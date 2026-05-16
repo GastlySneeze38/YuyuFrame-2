@@ -40,3 +40,14 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+# ── Frontend (Electron/Vite/React) ──
+frontend/node_modules/
+frontend/out/
+frontend/dist/
+
+# ── Backend (Rust) ──
+backend/target/
+
+# ── YuyuFrame data ──
+session.json
