@@ -27,6 +27,9 @@ interface Store {
   minecraftPath: string
   setMinecraftPath: (p: string) => void
 
+  brightness: number
+  setBrightness: (b: number) => void
+
   gameRunning: boolean
   setGameRunning: (r: boolean) => void
 }
@@ -64,6 +67,9 @@ export const useStore = create<Store>()(
       minecraftPath: '',
       setMinecraftPath: (minecraftPath) => set({ minecraftPath }),
 
+      brightness: 100,
+      setBrightness: (brightness) => set({ brightness }),
+
       gameRunning: false,
       setGameRunning: (gameRunning) => set({ gameRunning }),
     }),
@@ -75,6 +81,7 @@ export const useStore = create<Store>()(
         ram: s.ram,
         javaPath: s.javaPath,
         minecraftPath: s.minecraftPath,
+        brightness: s.brightness,
       }),
     }
   )

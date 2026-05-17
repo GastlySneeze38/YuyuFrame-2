@@ -3,7 +3,7 @@ import { useStore } from '@/stores/useStore'
 
 export default function Settings() {
   const navigate = useNavigate()
-  const { ram, setRam, javaPath, setJavaPath, minecraftPath, setMinecraftPath, theme, toggleTheme } = useStore()
+  const { ram, setRam, javaPath, setJavaPath, minecraftPath, setMinecraftPath, theme, toggleTheme, brightness, setBrightness } = useStore()
 
   return (
     <div className="flex h-full flex-col overflow-hidden" style={{ background: '#09090D' }}>
@@ -114,32 +114,79 @@ export default function Settings() {
               </svg>
             }
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-white">Thème</p>
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
-                  Actuellement :{' '}
-                  <span style={{ color: '#7b72e9', fontWeight: 600 }}>{theme}</span>
-                </p>
+            <div className="flex flex-col gap-6">
+              {/* Thème */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-white">Thème</p>
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
+                    Actuellement :{' '}
+                    <span style={{ color: '#7b72e9', fontWeight: 600 }}>{theme}</span>
+                  </p>
+                </div>
+                <button
+                  onClick={toggleTheme}
+                  className="rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-150"
+                  style={{
+                    background: 'rgba(75,63,207,0.15)',
+                    border: '1px solid rgba(75,63,207,0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(75,63,207,0.28)'
+                    e.currentTarget.style.borderColor = 'rgba(75,63,207,0.55)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(75,63,207,0.15)'
+                    e.currentTarget.style.borderColor = 'rgba(75,63,207,0.3)'
+                  }}
+                >
+                  {theme === 'chill' ? '🎮 Passer en Gamer' : '❄️ Passer en Chill'}
+                </button>
               </div>
-              <button
-                onClick={toggleTheme}
-                className="rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-150"
-                style={{
-                  background: 'rgba(75,63,207,0.15)',
-                  border: '1px solid rgba(75,63,207,0.3)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(75,63,207,0.28)'
-                  e.currentTarget.style.borderColor = 'rgba(75,63,207,0.55)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(75,63,207,0.15)'
-                  e.currentTarget.style.borderColor = 'rgba(75,63,207,0.3)'
-                }}
-              >
-                {theme === 'chill' ? '🎮 Passer en Gamer' : '❄️ Passer en Chill'}
-              </button>
+
+              {/* Séparateur */}
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+
+              {/* Luminosité */}
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-white">Luminosité</p>
+                    <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
+                      Ajuste la luminosité de l'interface
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold" style={{ color: '#7b72e9' }}>
+                      {brightness}%
+                    </span>
+                    {brightness !== 100 && (
+                      <button
+                        onClick={() => setBrightness(100)}
+                        className="rounded-lg px-2 py-0.5 text-xs transition-all duration-150"
+                        style={{ color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.05)' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.6)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.3)' }}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={40} max={160} step={5}
+                  value={brightness}
+                  onChange={(e) => setBrightness(Number(e.target.value))}
+                  className="w-full"
+                  style={{ accentColor: '#4B3FCF' }}
+                />
+                <div className="flex justify-between" style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>
+                  <span>Sombre</span>
+                  <span>Normal</span>
+                  <span>Clair</span>
+                </div>
+              </div>
             </div>
           </SCard>
 

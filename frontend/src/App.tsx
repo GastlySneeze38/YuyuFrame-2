@@ -7,7 +7,7 @@ import Settings from '@/pages/Settings'
 import { useStore } from '@/stores/useStore'
 
 export default function App() {
-  const { theme } = useStore()
+  const { theme, brightness } = useStore()
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -16,7 +16,7 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-primary">
       <TitleBar />
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden" style={{ filter: `brightness(${brightness / 100})` }}>
         <Routes>
           <Route path="/" element={<Navigate to="/home" replace />} />
           <Route path="/login" element={<Login />} />
