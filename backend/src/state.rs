@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
