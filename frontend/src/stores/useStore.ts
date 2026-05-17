@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Theme, Version } from '@/types'
+import type { Theme, Version, Account } from '@/types'
 
 interface Store {
   theme: Theme
@@ -11,6 +11,11 @@ interface Store {
   uuid: string | null
   setUser: (username: string, uuid: string) => void
   clearUser: () => void
+
+  accounts: Account[]
+  addAccount: (username: string, uuid: string) => void
+  removeAccount: (uuid: string) => void
+  switchAccount: (uuid: string) => void
 
   versions: Version[]
   setVersions: (v: Version[]) => void
@@ -52,6 +57,35 @@ export const useStore = create<Store>()(
       setUser: (username, uuid) => set({ username, uuid }),
       clearUser: () => set({ username: null, uuid: null }),
 
+      accounts: [],
+      addAccount: (username, uuid) => {
+        const accounts = get().accounts
+        const idx = accounts.findIndex((a) => a.uuid === uuid)
+        let next: Account[]
+        if (idx >= 0) {
+          next = accounts.map((a, i) => (i === idx ? { username, uuid } : a))
+        } else if (accounts.length < 2) {
+          next = [...accounts, { username, uuid }]
+        } else {
+          next = accounts
+        }
+        set({ accounts: next, username, uuid })
+      },
+      removeAccount: (targetUuid) => {
+        const accounts = get().accounts.filter((a) => a.uuid !== targetUuid)
+        const activeUuid = get().uuid
+        if (activeUuid === targetUuid) {
+          const other = accounts[0] ?? null
+          set({ accounts, username: other?.username ?? null, uuid: other?.uuid ?? null })
+        } else {
+          set({ accounts })
+        }
+      },
+      switchAccount: (targetUuid) => {
+        const account = get().accounts.find((a) => a.uuid === targetUuid)
+        if (account) set({ username: account.username, uuid: account.uuid })
+      },
+
       versions: [],
       setVersions: (versions) => set({ versions }),
 
@@ -82,6 +116,9 @@ export const useStore = create<Store>()(
         javaPath: s.javaPath,
         minecraftPath: s.minecraftPath,
         brightness: s.brightness,
+        accounts: s.accounts,
+        username: s.username,
+        uuid: s.uuid,
       }),
     }
   )

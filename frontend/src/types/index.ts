@@ -31,3 +31,8 @@ export interface ProgressResponse {
 }
 
 export type Theme = 'chill' | 'gamer'
+
+export interface Account {
+  username: string
+  uuid: string
+}
