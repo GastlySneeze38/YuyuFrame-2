@@ -291,7 +291,7 @@ function AccountCard({
 
       <div className="relative mt-2">
         <img
-          src={`https://crafatar.com/avatars/${acc.uuid}?size=80&overlay`}
+          src={`https://mc-heads.net/avatar/${acc.uuid}/80`}
           alt={acc.username}
           className="rounded-xl"
           style={{ width: 80, height: 80, imageRendering: 'pixelated' }}

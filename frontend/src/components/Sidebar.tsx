@@ -77,13 +77,14 @@ export function Sidebar() {
       {/* Bottom: login button or logo */}
       <div className="mt-auto flex flex-col items-center gap-2 pb-1">
         {username ? (
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-xs font-black text-white"
+          <button
+            className="flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-150 bg-accent text-xs font-black text-white hover:opacity-80"
             style={{ fontFamily: 'monospace' }}
             title={username}
+            onClick={() => navigate('/login')}
           >
             {username[0].toUpperCase()}
-          </div>
+          </button>
         ) : (
           <button
             title="Se connecter"

@@ -49,6 +49,9 @@ frontend/dist/
 
 # ── Backend (Rust) ──
 backend/target/
+yuyu.db-shm
+yuyu.db-wal
+yuyu.db
 
 # ── YuyuFrame data ──
 session.json
