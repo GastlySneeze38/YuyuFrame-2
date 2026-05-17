@@ -26,10 +26,12 @@ pub async fn list_accounts(
 ) -> Result<Json<Vec<AccountInfo>>, StatusCode> {
     let s = state.read().await;
     let yuyu = state::extract_yuyu(&s, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
-
     let conn = s.db.lock().await;
-    let rows = db::list_mc_sessions(&conn, yuyu.user_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let active_uuid = db::get_active_mc_uuid(&conn, yuyu.user_id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let rows = db::list_mc_sessions(&conn, yuyu.user_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let active_uuid = db::get_active_mc_uuid(&conn, yuyu.user_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let accounts = rows
         .into_iter()
@@ -49,22 +51,30 @@ pub async fn switch_account(
     headers: HeaderMap,
     Json(body): Json<SwitchBody>,
 ) -> Result<Json<AccountInfo>, (StatusCode, String)> {
-    let s = state.read().await;
-    let yuyu = state::extract_yuyu(&s, &headers).ok_or((StatusCode::UNAUTHORIZED, "Non authentifié".into()))?;
+    // ── Phase 1 : lecture DB (read lock court) ────────────────────────────────
+    let (yuyu_user_id, row) = {
+        let s = state.read().await;
+        let yuyu = state::extract_yuyu(&s, &headers)
+            .ok_or((StatusCode::UNAUTHORIZED, "Non authentifié".into()))?;
+        let conn = s.db.lock().await;
+        let row = db::get_mc_session(&conn, yuyu.user_id, &body.uuid)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Compte introuvable".into()))?;
+        (yuyu.user_id, row)
+        // conn and s dropped here
+    };
 
-    let conn = s.db.lock().await;
-    let row = db::get_mc_session(&conn, yuyu.user_id, &body.uuid)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Compte introuvable".into()))?;
-
-    // Refresh if expiring within 30 minutes
+    // ── Phase 2 : refresh si nécessaire (sans lock) ───────────────────────────
     let now = chrono::Utc::now().timestamp();
     let mc_session = if row.expires_at - now < 1800 {
         tracing::info!("Rafraîchissement du token pour {} lors du switch", row.mc_username);
         match mc_auth::refresh_session(&row.ms_refresh_token).await {
             Ok((mc_at, mc_user, mc_uuid, new_refresh, new_exp)) => {
-                db::update_mc_tokens(&conn, yuyu.user_id, &mc_uuid, &mc_at, &new_refresh, new_exp)
-                    .ok();
+                let s = state.read().await;
+                let conn = s.db.lock().await;
+                db::update_mc_tokens(&conn, yuyu_user_id, &mc_uuid, &mc_at, &new_refresh, new_exp).ok();
+                drop(conn);
+                drop(s);
                 state::MinecraftSession {
                     username: mc_user,
                     uuid: mc_uuid,
@@ -94,10 +104,14 @@ pub async fn switch_account(
         }
     };
 
-    db::set_active_mc(&conn, yuyu.user_id, &body.uuid)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    drop(conn);
+    // Marquer actif en DB
+    {
+        let s = state.read().await;
+        let conn = s.db.lock().await;
+        db::set_active_mc(&conn, yuyu_user_id, &body.uuid)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        // conn and s dropped here
+    }
 
     let info = AccountInfo {
         mc_username: mc_session.username.clone(),
@@ -105,8 +119,8 @@ pub async fn switch_account(
         is_active: true,
     };
 
-    let mut w = state.write().await;
-    w.session = Some(mc_session);
+    // ── Phase 3 : écriture de l'état (write lock) ─────────────────────────────
+    state.write().await.session = Some(mc_session);
 
     Ok(Json(info))
 }
@@ -117,17 +131,18 @@ pub async fn delete_account(
     headers: HeaderMap,
     Path(uuid): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let s = state.read().await;
-    let yuyu = state::extract_yuyu(&s, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    // ── Phase 1 : lecture + suppression DB ───────────────────────────────────
+    {
+        let s = state.read().await;
+        let yuyu = state::extract_yuyu(&s, &headers).ok_or(StatusCode::UNAUTHORIZED)?;
+        let conn = s.db.lock().await;
+        db::delete_mc_session(&conn, yuyu.user_id, &uuid)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        db::clear_active_mc(&conn, yuyu.user_id, &uuid).ok();
+        // conn and s dropped here
+    }
 
-    let conn = s.db.lock().await;
-    db::delete_mc_session(&conn, yuyu.user_id, &uuid)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    // clear active_mc if it was the deleted account
-    db::clear_active_mc(&conn, yuyu.user_id, &uuid).ok();
-    drop(conn);
-
-    // Clear in-memory session if it matches
+    // ── Phase 2 : mise à jour état mémoire ───────────────────────────────────
     let mut w = state.write().await;
     if w.session.as_ref().map(|s| s.uuid.as_str()) == Some(uuid.as_str()) {
         w.session = None;

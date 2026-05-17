@@ -19,9 +19,22 @@ async fn main() -> anyhow::Result<()> {
     let conn = db::init_db().expect("Impossible d'initialiser la base de données");
     tracing::info!("Base de données SQLite initialisée");
 
+    // Restore yuyu session from DB if it exists
+    let yuyu_session = db::load_yuyu_token(&conn)
+        .ok()
+        .flatten()
+        .map(|row| {
+            tracing::info!("Session YuyuFrame restaurée pour {}", row.username);
+            state::YuyuSession {
+                user_id: row.user_id,
+                username: row.username,
+                token: row.token,
+            }
+        });
+
     let app_state = Arc::new(RwLock::new(state::AppState {
         db: Arc::new(Mutex::new(conn)),
-        yuyu_session: None,
+        yuyu_session,
         session: None,
         download_progress: None,
         game_running: false,

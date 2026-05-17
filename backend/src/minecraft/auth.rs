@@ -25,6 +25,7 @@ pub struct DeviceCodeResponse {
 struct MsDeviceCodeResp {
     device_code: String,
     user_code: String,
+    #[serde(alias = "verification_url")]
     verification_uri: String,
     expires_in: i64,
 }
@@ -156,13 +157,16 @@ pub async fn start_device_auth() -> Result<DeviceCodeResponse> {
         ("client_id", MS_CLIENT_ID),
         ("scope", "XboxLive.signin offline_access"),
     ];
-    let resp: MsDeviceCodeResp = client
+    let raw = client
         .post(DEVICE_CODE_URL)
         .form(&params)
         .send()
         .await?
-        .json()
+        .text()
         .await?;
+    tracing::debug!("MS device code raw response: {}", raw);
+    let resp: MsDeviceCodeResp = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("Échec parsing device code: {} — Body: {}", e, raw))?;
     Ok(DeviceCodeResponse {
         device_code: resp.device_code,
         user_code: resp.user_code,
@@ -179,13 +183,16 @@ pub async fn poll_device_auth(device_code: &str) -> Result<Option<MinecraftSessi
         ("device_code", device_code),
         ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
     ];
-    let resp: MsTokenResp = client
+    let raw = client
         .post(TOKEN_URL)
         .form(&params)
         .send()
         .await?
-        .json()
+        .text()
         .await?;
+    tracing::debug!("MS poll raw response: {}", raw);
+    let resp: MsTokenResp = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("Échec parsing poll: {} — Body: {}", e, raw))?;
 
     if let Some(err) = resp.error {
         if err == "authorization_pending" {
@@ -227,13 +234,16 @@ pub async fn refresh_session(
         ("grant_type", "refresh_token"),
         ("scope", "XboxLive.signin offline_access"),
     ];
-    let resp: MsTokenResp = client
+    let raw = client
         .post(TOKEN_URL)
         .form(&params)
         .send()
         .await?
-        .json()
+        .text()
         .await?;
+    tracing::debug!("MS refresh raw response: {}", raw);
+    let resp: MsTokenResp = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("Échec parsing refresh: {} — Body: {}", e, raw))?;
 
     if let Some(err) = resp.error {
         return Err(anyhow!("MS refresh error: {}", err));

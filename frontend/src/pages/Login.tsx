@@ -13,6 +13,7 @@ export default function Login() {
   const [userCode, setUserCode] = useState('')
   const [verifyUrl, setVerifyUrl] = useState('')
   const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Sync accounts from backend on mount
@@ -222,20 +223,29 @@ export default function Login() {
             {step === 'error' && (
               <div className="flex flex-col gap-3">
                 <div
-                  className="rounded-xl px-4 py-3 text-center"
+                  className="rounded-xl px-4 py-3"
                   style={{ background: 'rgba(200,50,50,0.12)', border: '1px solid rgba(200,50,50,0.2)' }}
                 >
-                  <span style={{ fontSize: 12, color: 'rgb(252,165,165)' }}>{error}</span>
+                  <p style={{ fontSize: 11, color: 'rgb(252,165,165)', wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>{error}</p>
                 </div>
-                <button
-                  onClick={() => setStep('idle')}
-                  className="w-full rounded-xl py-2.5 text-sm transition-all duration-150"
-                  style={{ color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.4)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'rgba(255,255,255,0.4)' }}
-                >
-                  Réessayer
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(error); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+                    className="rounded-xl px-3 py-2.5 text-sm transition-all duration-150"
+                    style={{ color: copied ? 'rgb(134,239,172)' : 'rgba(255,255,255,0.4)', border: `1px solid ${copied ? 'rgba(74,222,128,0.3)' : 'rgba(255,255,255,0.08)'}` }}
+                  >
+                    {copied ? 'Copié ✓' : 'Copier'}
+                  </button>
+                  <button
+                    onClick={() => setStep('idle')}
+                    className="flex-1 rounded-xl py-2.5 text-sm transition-all duration-150"
+                    style={{ color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.4)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'rgba(255,255,255,0.4)' }}
+                  >
+                    Réessayer
+                  </button>
+                </div>
               </div>
             )}
           </div>

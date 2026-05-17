@@ -60,29 +60,30 @@ pub async fn register(
         ));
     }
 
-    let s = state.read().await;
-    let conn = s.db.lock().await;
+    // ── Phase 1 : lecture + écriture DB (read lock) ───────────────────────────
+    let (user_id, token) = {
+        let s = state.read().await;
+        let conn = s.db.lock().await;
 
-    if db::account_exists(&conn).map_err(internal)? {
-        return Err((
-            StatusCode::CONFLICT,
-            "Un compte YuyuFrame existe déjà".into(),
-        ));
-    }
+        if db::account_exists(&conn).map_err(internal)? {
+            return Err((StatusCode::CONFLICT, "Un compte YuyuFrame existe déjà".into()));
+        }
 
-    let salt = SaltString::generate(&mut OsRng);
-    let hash = Argon2::default()
-        .hash_password(body.password.as_bytes(), &salt)
-        .map_err(|e| internal(anyhow::anyhow!("{}", e)))?
-        .to_string();
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(body.password.as_bytes(), &salt)
+            .map_err(|e| internal(anyhow::anyhow!("{}", e)))?
+            .to_string();
 
-    let user_id = db::create_user(&conn, &body.username, &hash).map_err(internal)?;
+        let user_id = db::create_user(&conn, &body.username, &hash).map_err(internal)?;
+        let token = gen_token();
+        db::save_yuyu_token(&conn, user_id, &token).map_err(internal)?;
+        (user_id, token)
+        // conn and s are dropped here
+    };
 
-    let token = gen_token();
-    drop(conn);
-
-    let mut w = state.write().await;
-    w.yuyu_session = Some(YuyuSession {
+    // ── Phase 2 : écriture de l'état (write lock, read lock libéré) ───────────
+    state.write().await.yuyu_session = Some(YuyuSession {
         user_id,
         username: body.username.clone(),
         token: token.clone(),
@@ -102,30 +103,34 @@ pub async fn login(
 ) -> Result<Json<LoginResp>, (StatusCode, String)> {
     use argon2::{Argon2, PasswordHash, PasswordVerifier};
     use crate::minecraft::auth as mc_auth;
+    use crate::state::MinecraftSession;
 
-    let s = state.read().await;
-    let conn = s.db.lock().await;
+    // ── Phase 1 : vérification mot de passe + lecture DB (read lock) ─────────
+    let (user_id, username, rows, active_uuid) = {
+        let s = state.read().await;
+        let conn = s.db.lock().await;
 
-    let user = db::get_user(&conn, &body.username)
-        .map_err(internal)?
-        .ok_or((StatusCode::UNAUTHORIZED, "Compte introuvable".into()))?;
+        let user = db::get_user(&conn, &body.username)
+            .map_err(internal)?
+            .ok_or((StatusCode::UNAUTHORIZED, "Compte introuvable".into()))?;
 
-    let hash = PasswordHash::new(&user.password_hash)
-        .map_err(|e| internal(anyhow::anyhow!("{}", e)))?;
-    Argon2::default()
-        .verify_password(body.password.as_bytes(), &hash)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Mot de passe incorrect".into()))?;
+        let hash = PasswordHash::new(&user.password_hash)
+            .map_err(|e| internal(anyhow::anyhow!("{}", e)))?;
+        Argon2::default()
+            .verify_password(body.password.as_bytes(), &hash)
+            .map_err(|_| (StatusCode::UNAUTHORIZED, "Mot de passe incorrect".into()))?;
 
-    // Load MC sessions from DB
-    let rows = db::list_mc_sessions(&conn, user.id).map_err(internal)?;
-    let active_uuid = db::get_active_mc_uuid(&conn, user.id).map_err(internal)?;
+        let rows = db::list_mc_sessions(&conn, user.id).map_err(internal)?;
+        let active_uuid = db::get_active_mc_uuid(&conn, user.id).map_err(internal)?;
 
-    let token = gen_token();
+        (user.id, user.username, rows, active_uuid)
+        // conn and s dropped here
+    };
 
-    // Build account list and resolve the active session (refresh if needed)
+    // ── Phase 2 : refresh token si nécessaire (sans lock) ────────────────────
     let now = chrono::Utc::now().timestamp();
     let mut accounts: Vec<AccountInfo> = Vec::new();
-    let mut active_session = None;
+    let mut active_session: Option<MinecraftSession> = None;
 
     for row in &rows {
         let is_active = active_uuid.as_deref() == Some(&row.mc_uuid);
@@ -136,16 +141,18 @@ pub async fn login(
         });
 
         if is_active {
-            // If token expires within 30 min, refresh proactively
             if row.expires_at - now < 1800 {
                 tracing::info!("Rafraîchissement du token pour {}", row.mc_username);
                 match mc_auth::refresh_session(&row.ms_refresh_token).await {
                     Ok((mc_at, mc_user, mc_uuid, new_refresh, new_exp)) => {
-                        db::update_mc_tokens(
-                            &conn, user.id, &mc_uuid, &mc_at, &new_refresh, new_exp,
-                        )
-                        .ok();
-                        active_session = Some(crate::state::MinecraftSession {
+                        // Mise à jour DB (read lock court)
+                        let s = state.read().await;
+                        let conn = s.db.lock().await;
+                        db::update_mc_tokens(&conn, user_id, &mc_uuid, &mc_at, &new_refresh, new_exp).ok();
+                        drop(conn);
+                        drop(s);
+
+                        active_session = Some(MinecraftSession {
                             username: mc_user,
                             uuid: mc_uuid,
                             access_token: mc_at,
@@ -155,8 +162,7 @@ pub async fn login(
                     }
                     Err(e) => {
                         tracing::warn!("Échec du rafraîchissement: {}", e);
-                        // Use stale session anyway — launch will fail later with a clear error
-                        active_session = Some(crate::state::MinecraftSession {
+                        active_session = Some(MinecraftSession {
                             username: row.mc_username.clone(),
                             uuid: row.mc_uuid.clone(),
                             access_token: row.access_token.clone(),
@@ -166,7 +172,7 @@ pub async fn login(
                     }
                 }
             } else {
-                active_session = Some(crate::state::MinecraftSession {
+                active_session = Some(MinecraftSession {
                     username: row.mc_username.clone(),
                     uuid: row.mc_uuid.clone(),
                     access_token: row.access_token.clone(),
@@ -177,25 +183,37 @@ pub async fn login(
         }
     }
 
-    drop(conn);
+    // ── Phase 3 : écriture de l'état (write lock) ─────────────────────────────
+    let token = gen_token();
+    {
+        let s = state.read().await;
+        let conn = s.db.lock().await;
+        db::save_yuyu_token(&conn, user_id, &token).map_err(internal)?;
+    }
+    {
+        let mut w = state.write().await;
+        w.yuyu_session = Some(YuyuSession {
+            user_id,
+            username: username.clone(),
+            token: token.clone(),
+        });
+        w.session = active_session;
+    }
 
-    let mut w = state.write().await;
-    w.yuyu_session = Some(YuyuSession {
-        user_id: user.id,
-        username: user.username.clone(),
-        token: token.clone(),
-    });
-    w.session = active_session;
-
-    Ok(Json(LoginResp {
-        token,
-        username: user.username,
-        accounts,
-    }))
+    Ok(Json(LoginResp { token, username, accounts }))
 }
 
 /// POST /api/yuyu/logout
 pub async fn logout(State(state): State<SharedState>) -> StatusCode {
+    let user_id = {
+        let w = state.read().await;
+        w.yuyu_session.as_ref().map(|s| s.user_id)
+    };
+    if let Some(uid) = user_id {
+        let s = state.read().await;
+        let conn = s.db.lock().await;
+        db::delete_yuyu_token(&conn, uid).ok();
+    }
     let mut w = state.write().await;
     w.yuyu_session = None;
     w.session = None;

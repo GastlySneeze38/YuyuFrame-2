@@ -31,6 +31,12 @@ pub fn init_db() -> Result<Connection> {
          CREATE TABLE IF NOT EXISTS active_mc (
              yuyu_user_id INTEGER PRIMARY KEY REFERENCES yuyu_users(id) ON DELETE CASCADE,
              mc_uuid      TEXT    NOT NULL
+         );
+
+         CREATE TABLE IF NOT EXISTS yuyu_tokens (
+             user_id    INTEGER PRIMARY KEY REFERENCES yuyu_users(id) ON DELETE CASCADE,
+             token      TEXT    NOT NULL,
+             created_at INTEGER NOT NULL
          );",
     )?;
 
@@ -210,5 +216,47 @@ pub fn clear_active_mc(conn: &Connection, yuyu_user_id: i64, mc_uuid: &str) -> R
         "DELETE FROM active_mc WHERE yuyu_user_id = ?1 AND mc_uuid = ?2",
         params![yuyu_user_id, mc_uuid],
     )?;
+    Ok(())
+}
+
+// ── YuyuFrame session token ────────────────────────────────────────────────────
+
+pub struct YuyuTokenRow {
+    pub user_id: i64,
+    pub username: String,
+    pub token: String,
+}
+
+pub fn save_yuyu_token(conn: &Connection, user_id: i64, token: &str) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO yuyu_tokens (user_id, token, created_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, created_at = excluded.created_at",
+        params![user_id, token, now],
+    )?;
+    Ok(())
+}
+
+pub fn load_yuyu_token(conn: &Connection) -> Result<Option<YuyuTokenRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.user_id, u.username, t.token
+         FROM yuyu_tokens t JOIN yuyu_users u ON u.id = t.user_id
+         LIMIT 1",
+    )?;
+    match stmt.query_row([], |r| {
+        Ok(YuyuTokenRow {
+            user_id: r.get(0)?,
+            username: r.get(1)?,
+            token: r.get(2)?,
+        })
+    }) {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn delete_yuyu_token(conn: &Connection, user_id: i64) -> Result<()> {
+    conn.execute("DELETE FROM yuyu_tokens WHERE user_id = ?1", params![user_id])?;
     Ok(())
 }
