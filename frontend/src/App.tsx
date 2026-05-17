@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useNavigate, useLocation } from 'react-router-
 import { TitleBar } from '@/components/TitleBar'
 import Login from '@/pages/Login'
 import Home from '@/pages/Home'
+import Mods from '@/pages/Mods'
 import Settings from '@/pages/Settings'
 import YuyuLogin from '@/pages/YuyuLogin'
 import { useStore } from '@/stores/useStore'
@@ -52,6 +53,7 @@ export default function App() {
                   <Route path="/" element={<Navigate to="/home" replace />} />
                   <Route path="/home" element={<Home />} />
                   <Route path="/login" element={<Login />} />
+                  <Route path="/mods" element={<Mods />} />
                   <Route path="/settings" element={<Settings />} />
                 </Routes>
               </AuthGuard>

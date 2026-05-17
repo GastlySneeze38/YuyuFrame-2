@@ -30,6 +30,14 @@ export interface ProgressResponse {
   percent: number
 }
 
+export interface Mod {
+  name: string
+  size: number
+  enabled: boolean
+}
+
+export type Loader = 'vanilla' | 'fabric' | 'forge'
+
 export type Theme = 'chill' | 'gamer'
 
 export interface Account {

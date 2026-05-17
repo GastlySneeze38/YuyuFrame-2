@@ -8,6 +8,8 @@ use crate::state::SharedState;
 pub struct LaunchRequest {
     pub version: String,
     pub ram: Option<u32>,
+    /// "vanilla" | "fabric" | "forge" — defaults to "vanilla"
+    pub loader: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -46,11 +48,18 @@ pub async fn launch_game(
     let state_clone = state.clone();
     let version = req.version.clone();
     let ram = req.ram.unwrap_or(4096);
+    let loader = req.loader.clone().unwrap_or_else(|| "vanilla".to_string());
 
     tokio::spawn(async move {
         state_clone.write().await.game_running = true;
-        if let Err(e) =
-            launcher::download_and_launch(&version, &session, ram, state_clone.clone()).await
+        if let Err(e) = launcher::download_and_launch(
+            &version,
+            Some(&loader),
+            &session,
+            ram,
+            state_clone.clone(),
+        )
+        .await
         {
             tracing::error!("Erreur de lancement: {}", e);
         }

@@ -3,11 +3,13 @@ use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
 use crate::state::{DownloadProgress, MinecraftSession, SharedState};
+use super::fabric;
+use super::forge;
 use super::versions::{
     fetch_asset_index, fetch_version_details, fetch_version_list, Artifact, Library, VersionDetails,
 };
 
-fn minecraft_dir() -> PathBuf {
+pub fn minecraft_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("YuyuFrame")
@@ -22,8 +24,10 @@ async fn set_progress(state: &SharedState, current: u64, total: u64, message: &s
     });
 }
 
+/// `loader` — "vanilla" | "fabric" | "forge" (None treated as vanilla)
 pub async fn download_and_launch(
     version_id: &str,
+    loader: Option<&str>,
     session: &MinecraftSession,
     ram_mb: u32,
     state: SharedState,
@@ -38,7 +42,8 @@ pub async fn download_and_launch(
         tokio::fs::create_dir_all(dir).await?;
     }
 
-    // Resolve version URL
+    // ── Vanilla download ──────────────────────────────────────────────────────
+
     set_progress(&state, 0, 100, "Récupération du manifest...").await;
     let versions = fetch_version_list().await?;
     let version_info = versions
@@ -49,25 +54,28 @@ pub async fn download_and_launch(
     set_progress(&state, 5, 100, "Récupération des détails...").await;
     let details = fetch_version_details(&version_info.url).await?;
 
-    // Client JAR
     let client_jar = versions_dir.join(format!("{}.jar", version_id));
     if !client_jar.exists() {
         set_progress(&state, 10, 100, "Téléchargement du client Minecraft...").await;
         download_file(&details.downloads.client.url, &client_jar).await?;
     }
 
-    // Libraries
     set_progress(&state, 20, 100, "Téléchargement des bibliothèques...").await;
-    let mut classpath = vec![client_jar.to_string_lossy().to_string()];
+    let mut classpath = Vec::new();
     let total_libs = details.libraries.len() as u64;
-    let os_key = if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "osx" } else { "linux" };
+    let os_key = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "osx"
+    } else {
+        "linux"
+    };
 
     for (i, lib) in details.libraries.iter().enumerate() {
         if !should_download_library(lib) {
             continue;
         }
         if let Some(ref dl) = lib.downloads {
-            // ── Main artifact ──────────────────────────────────────────────────
             if let Some(ref artifact) = dl.artifact {
                 let lib_path = artifact_path(&libraries_dir, artifact, &lib.name);
                 if let Some(parent) = lib_path.parent() {
@@ -76,7 +84,6 @@ pub async fn download_and_launch(
                 if !lib_path.exists() {
                     download_file(&artifact.url, &lib_path).await?;
                 }
-                // Native JARs (new format, name contains ":natives-") → also extract
                 if lib.name.contains(":natives-") {
                     extract_natives(&lib_path, &natives_dir).await.ok();
                 } else {
@@ -84,13 +91,20 @@ pub async fn download_and_launch(
                 }
             }
 
-            // ── Classifiers (old format) ───────────────────────────────────────
-            if let (Some(ref natives_map), Some(ref classifiers)) = (&lib.natives, &dl.classifiers) {
+            if let (Some(ref natives_map), Some(ref classifiers)) =
+                (&lib.natives, &dl.classifiers)
+            {
                 if let Some(classifier_key) = natives_map.get(os_key) {
-                    // Strip optional ${arch} suffix some old versions use
-                    let key = classifier_key.replace("${arch}", if cfg!(target_pointer_width = "64") { "64" } else { "32" });
+                    let key = classifier_key.replace(
+                        "${arch}",
+                        if cfg!(target_pointer_width = "64") { "64" } else { "32" },
+                    );
                     if let Some(native_artifact) = classifiers.get(&key) {
-                        let native_path = artifact_path(&libraries_dir, native_artifact, &format!("{}:{}", lib.name, key));
+                        let native_path = artifact_path(
+                            &libraries_dir,
+                            native_artifact,
+                            &format!("{}:{}", lib.name, key),
+                        );
                         if let Some(parent) = native_path.parent() {
                             tokio::fs::create_dir_all(parent).await?;
                         }
@@ -105,7 +119,7 @@ pub async fn download_and_launch(
         if i as u64 % 10 == 0 {
             set_progress(
                 &state,
-                20 + i as u64 * 40 / total_libs.max(1),
+                20 + i as u64 * 30 / total_libs.max(1),
                 100,
                 &format!("Bibliothèques {}/{}", i + 1, total_libs),
             )
@@ -113,7 +127,8 @@ pub async fn download_and_launch(
         }
     }
 
-    // Assets
+    // ── Assets ────────────────────────────────────────────────────────────────
+
     let asset_index_path = assets_dir
         .join("indexes")
         .join(format!("{}.json", details.asset_index.id));
@@ -144,7 +159,7 @@ pub async fn download_and_launch(
         if asset_count % 200 == 0 {
             set_progress(
                 &state,
-                60 + asset_count * 30 / total_assets.max(1),
+                50 + asset_count * 20 / total_assets.max(1),
                 100,
                 &format!("Assets {}/{}", asset_count, total_assets),
             )
@@ -152,23 +167,49 @@ pub async fn download_and_launch(
         }
     }
 
-    // Build and run
-    set_progress(&state, 95, 100, "Lancement de Minecraft...").await;
+    // ── Loader-specific setup ────────────────────────────────────────────────
+
     let java = find_java()?;
 
-    let classpath_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-    let classpath_str = classpath.join(classpath_sep);
+    let (main_class, extra_classpath, extra_game_args, extra_jvm_args) =
+        match loader.unwrap_or("vanilla") {
+            "fabric" => {
+                setup_fabric(version_id, &mc_dir, &libraries_dir, &state).await?
+            }
+            "forge" => {
+                setup_forge(version_id, &mc_dir, &libraries_dir, &java, &state).await?
+            }
+            _ => (details.main_class.clone(), vec![], vec![], vec![]),
+        };
 
-    let mut args = vec![
+    // ── Launch ───────────────────────────────────────────────────────────────
+
+    set_progress(&state, 95, 100, "Lancement de Minecraft...").await;
+
+    let classpath_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+
+    // Loader libs first, then vanilla libs, client JAR last.
+    // Deduplicate by group/artifact so Fabric's newer ASM wins over vanilla's older one.
+    let mut full_classpath: Vec<String> = extra_classpath;
+    full_classpath.extend(classpath);
+    full_classpath.push(client_jar.to_string_lossy().to_string());
+    let classpath_str = dedup_classpath(full_classpath).join(classpath_sep);
+
+    let mut args: Vec<String> = vec![
         format!("-Xmx{}m", ram_mb),
         format!("-Xms{}m", ram_mb / 2),
         format!("-Djava.library.path={}", natives_dir.display()),
-        "-cp".to_string(),
-        classpath_str,
-        details.main_class.clone(),
     ];
-
-    args.extend(build_game_args(&details, session, &mc_dir, &assets_dir, version_id));
+    args.extend(extra_jvm_args);
+    args.extend(["-cp".to_string(), classpath_str, main_class]);
+    args.extend(build_game_args(
+        &details,
+        session,
+        &mc_dir,
+        &assets_dir,
+        version_id,
+    ));
+    args.extend(extra_game_args);
 
     let mut child = tokio::process::Command::new(&java)
         .args(&args)
@@ -178,6 +219,154 @@ pub async fn download_and_launch(
     state.write().await.download_progress = None;
     child.wait().await?;
     Ok(())
+}
+
+/// Returns (mainClass, extra_classpath_entries, extra_game_args, extra_jvm_args)
+async fn setup_fabric(
+    mc_version: &str,
+    mc_dir: &PathBuf,
+    libraries_dir: &PathBuf,
+    state: &SharedState,
+) -> Result<(String, Vec<String>, Vec<String>, Vec<String>)> {
+    set_progress(state, 72, 100, "Téléchargement Fabric Loader...").await;
+
+    let profile = fabric::get_latest_profile(mc_version).await?;
+
+    // Auto-install Fabric API into the mods folder
+    let mods_dir = mc_dir.join("mods");
+    if let Err(e) = fabric::ensure_fabric_api(mc_version, &mods_dir).await {
+        tracing::warn!("Fabric API auto-install échoué: {}", e);
+    }
+
+    let mut fabric_cp = Vec::new();
+
+    let total = profile.libraries.len();
+    for (i, lib) in profile.libraries.iter().enumerate() {
+        if let Some(path) = fabric::download_library(lib, libraries_dir).await {
+            fabric_cp.push(path.to_string_lossy().to_string());
+        }
+        if i % 5 == 0 {
+            set_progress(
+                state,
+                72 + i as u64 * 20 / total.max(1) as u64,
+                100,
+                &format!("Fabric libs {}/{}", i + 1, total),
+            )
+            .await;
+        }
+    }
+
+    // Extra JVM args from Fabric profile (e.g. -DFabricMcEmu)
+    let extra_jvm: Vec<String> = profile
+        .arguments
+        .as_ref()
+        .and_then(|a| a.jvm.as_ref())
+        .map(|jvm| {
+            jvm.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok((profile.main_class, fabric_cp, vec![], extra_jvm))
+}
+
+/// Returns (mainClass, extra_classpath_entries, extra_game_args, extra_jvm_args)
+async fn setup_forge(
+    mc_version: &str,
+    mc_dir: &PathBuf,
+    libraries_dir: &PathBuf,
+    java: &str,
+    state: &SharedState,
+) -> Result<(String, Vec<String>, Vec<String>, Vec<String>)> {
+    set_progress(state, 70, 100, "Recherche de la version Forge...").await;
+
+    let forge_ver = forge::fetch_latest_version(mc_version).await?;
+    tracing::info!("Forge {} pour MC {}", forge_ver, mc_version);
+
+    if !forge::is_installed(mc_version, &forge_ver, mc_dir) {
+        set_progress(state, 72, 100, "Téléchargement de l'installeur Forge...").await;
+        forge::install(mc_version, &forge_ver, mc_dir, java).await?;
+    }
+
+    let forge_json = forge::read_version_json(mc_version, &forge_ver, mc_dir)?;
+    let mut forge_cp = Vec::new();
+
+    if let Some(libs) = &forge_json.libraries {
+        let total = libs.len();
+        for (i, lib) in libs.iter().enumerate() {
+            if let Some(path) = forge::download_library(lib, libraries_dir).await {
+                forge_cp.push(path.to_string_lossy().to_string());
+            }
+            if i % 5 == 0 {
+                set_progress(
+                    state,
+                    80 + i as u64 * 12 / total.max(1) as u64,
+                    100,
+                    &format!("Forge libs {}/{}", i + 1, total),
+                )
+                .await;
+            }
+        }
+    }
+
+    // Extra game args from Forge profile
+    let extra_game: Vec<String> = forge_json
+        .arguments
+        .as_ref()
+        .and_then(|a| a.game.as_ref())
+        .map(|g| {
+            g.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let extra_jvm: Vec<String> = forge_json
+        .arguments
+        .as_ref()
+        .and_then(|a| a.jvm.as_ref())
+        .map(|j| {
+            j.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok((forge_json.main_class, forge_cp, extra_game, extra_jvm))
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Remove duplicate JARs that differ only in version (e.g. asm-9.6 vs asm-9.9).
+/// The first occurrence wins, so loader libs (added first) take precedence.
+fn dedup_classpath(entries: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let key = artifact_key(&entry);
+        if seen.insert(key) {
+            result.push(entry);
+        }
+    }
+    result
+}
+
+/// Extract a `group/artifact` key from a library path for deduplication.
+/// e.g. `.../libraries/org/ow2/asm/asm/9.9/asm-9.9.jar` → `org/ow2/asm/asm`
+fn artifact_key(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let marker = "/libraries/";
+    if let Some(idx) = normalized.rfind(marker) {
+        let rel = &normalized[idx + marker.len()..];
+        let parts: Vec<&str> = rel.split('/').collect();
+        if parts.len() >= 3 {
+            // Drop version and filename, keep group + artifact
+            return parts[..parts.len() - 2].join("/");
+        }
+    }
+    // Fallback: use the whole path (no dedup)
+    normalized
 }
 
 fn should_download_library(lib: &Library) -> bool {
@@ -211,7 +400,6 @@ fn should_download_library(lib: &Library) -> bool {
     allowed
 }
 
-/// Use artifact.path when available (always correct), otherwise derive from Maven name.
 fn artifact_path(base: &PathBuf, artifact: &Artifact, name: &str) -> PathBuf {
     if let Some(ref p) = artifact.path {
         return base.join(p);
@@ -220,7 +408,6 @@ fn artifact_path(base: &PathBuf, artifact: &Artifact, name: &str) -> PathBuf {
 }
 
 fn library_jar_path(base: &PathBuf, name: &str) -> PathBuf {
-    // "group:artifact:version" or "group:artifact:version:classifier"
     let parts: Vec<&str> = name.split(':').collect();
     if parts.len() < 3 {
         return base.join(name);
@@ -237,7 +424,6 @@ fn library_jar_path(base: &PathBuf, name: &str) -> PathBuf {
     base.join(group_path).join(artifact).join(version).join(filename)
 }
 
-/// Extract DLLs/SOs from a native JAR into the natives directory, skipping META-INF.
 async fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> Result<()> {
     let jar_bytes = tokio::fs::read(jar_path).await?;
     let cursor = std::io::Cursor::new(jar_bytes);
@@ -248,9 +434,10 @@ async fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> Result<()
         if name.starts_with("META-INF") || name.ends_with('/') {
             continue;
         }
-        // Only extract native files (.dll, .so, .dylib, .jnilib)
-        let is_native = name.ends_with(".dll") || name.ends_with(".so")
-            || name.ends_with(".dylib") || name.ends_with(".jnilib");
+        let is_native = name.ends_with(".dll")
+            || name.ends_with(".so")
+            || name.ends_with(".dylib")
+            || name.ends_with(".jnilib");
         if !is_native {
             continue;
         }
@@ -311,7 +498,7 @@ fn build_game_args(
     args
 }
 
-fn find_java() -> Result<String> {
+pub fn find_java() -> Result<String> {
     #[cfg(target_os = "windows")]
     {
         let candidates = [
@@ -319,6 +506,10 @@ fn find_java() -> Result<String> {
             r"C:\Program Files\Eclipse Adoptium\jdk-21\bin\java.exe",
             r"C:\Program Files\Microsoft\jdk-21\bin\java.exe",
             r"C:\Program Files\Java\jdk-21\bin\java.exe",
+            r"C:\Program Files\Java\jre-17\bin\java.exe",
+            r"C:\Program Files\Eclipse Adoptium\jdk-17\bin\java.exe",
+            r"C:\Program Files\Microsoft\jdk-17\bin\java.exe",
+            r"C:\Program Files\Java\jdk-17\bin\java.exe",
         ];
         for path in &candidates {
             if std::path::Path::new(path).exists() {
@@ -326,7 +517,6 @@ fn find_java() -> Result<String> {
             }
         }
     }
-    // Fall back to PATH
     Ok("java".to_string())
 }
 

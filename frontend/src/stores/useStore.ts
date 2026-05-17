@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { setApiToken } from '@/api/client'
-import type { Theme, Version, Account } from '@/types'
+import type { Loader, Theme, Version, Account } from '@/types'
 
 interface Store {
   // ── YuyuFrame session (NOT persisted — requires password on each start) ──
@@ -34,6 +34,9 @@ interface Store {
 
   selectedVersion: string
   setSelectedVersion: (v: string) => void
+
+  selectedLoader: Loader
+  setSelectedLoader: (l: Loader) => void
 
   // ── Settings (persisted) ──────────────────────────────────────────────────
   ram: number
@@ -120,6 +123,9 @@ export const useStore = create<Store>()(
       selectedVersion: '',
       setSelectedVersion: (selectedVersion) => set({ selectedVersion }),
 
+      selectedLoader: 'vanilla',
+      setSelectedLoader: (selectedLoader) => set({ selectedLoader }),
+
       // Settings
       ram: 4096,
       setRam: (ram) => set({ ram }),
@@ -143,6 +149,7 @@ export const useStore = create<Store>()(
       partialize: (s) => ({
         theme: s.theme,
         selectedVersion: s.selectedVersion,
+        selectedLoader: s.selectedLoader,
         ram: s.ram,
         javaPath: s.javaPath,
         minecraftPath: s.minecraftPath,

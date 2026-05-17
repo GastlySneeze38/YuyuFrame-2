@@ -1,6 +1,7 @@
 import type {
   AuthStatus,
   DeviceAuthResponse,
+  Mod,
   PollResponse,
   ProgressResponse,
   Version,
@@ -101,8 +102,34 @@ export const api = {
   },
 
   launch: {
-    start: (version: string, ram?: number) =>
-      post<{ success: boolean; message: string }>('/api/launch', { version, ram }),
+    start: (version: string, ram?: number, loader?: string) =>
+      post<{ success: boolean; message: string }>('/api/launch', { version, ram, loader }),
     progress: () => get<ProgressResponse>('/api/launch/progress'),
+  },
+
+  mods: {
+    list: () => get<Mod[]>('/api/mods'),
+    toggle: async (name: string): Promise<Mod> => {
+      const res = await fetch(`${BASE}/api/mods/${encodeURIComponent(name)}/toggle`, {
+        method: 'PUT',
+        headers: authHeaders(),
+      })
+      return res.json()
+    },
+    delete: (name: string) => del<void>(`/api/mods/${encodeURIComponent(name)}`),
+    upload: async (file: File): Promise<Mod> => {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`${BASE}/api/mods/upload`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: form,
+      })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => String(res.status))
+        throw new Error(msg)
+      }
+      return res.json()
+    },
   },
 }

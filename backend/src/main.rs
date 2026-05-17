@@ -1,5 +1,5 @@
 use axum::{
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use std::sync::Arc;
@@ -67,6 +67,11 @@ async fn main() -> anyhow::Result<()> {
         // Game
         .route("/api/launch", post(routes::launch::launch_game))
         .route("/api/launch/progress", get(routes::launch::download_progress))
+        // Mods
+        .route("/api/mods", get(routes::mods::list_mods))
+        .route("/api/mods/upload", post(routes::mods::upload_mod))
+        .route("/api/mods/:name/toggle", put(routes::mods::toggle_mod))
+        .route("/api/mods/:name", delete(routes::mods::delete_mod))
         .layer(cors)
         .with_state(app_state);
 

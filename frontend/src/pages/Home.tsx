@@ -18,6 +18,7 @@ export default function Home() {
     clearUser,
     versions, setVersions,
     selectedVersion, setSelectedVersion,
+    selectedLoader, setSelectedLoader,
     ram,
     gameRunning, setGameRunning,
   } = useStore()
@@ -64,7 +65,7 @@ export default function Home() {
     if (!selectedVersion || gameRunning || !username) return
     setLaunchMsg('')
     try {
-      const resp = await api.launch.start(selectedVersion, ram)
+      const resp = await api.launch.start(selectedVersion, ram, selectedLoader)
       if (resp.success) setGameRunning(true)
       else setLaunchMsg(resp.message)
     } catch (e) {
@@ -301,6 +302,32 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Loader selector */}
+          <div className="w-full">
+            <div className="mb-1.5">
+              <label style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>
+                Mod Loader
+              </label>
+            </div>
+            <div className="flex w-full gap-1.5">
+              {(['vanilla', 'fabric', 'forge'] as const).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setSelectedLoader(l)}
+                  className="flex-1 rounded-xl text-xs font-semibold transition-all duration-150"
+                  style={{
+                    height: 34,
+                    background: selectedLoader === l ? 'rgba(75,63,207,0.35)' : 'rgba(0,0,0,0.35)',
+                    border: `1px solid ${selectedLoader === l ? 'rgba(75,63,207,0.7)' : 'rgba(255,255,255,0.08)'}`,
+                    color: selectedLoader === l ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.35)',
+                  }}
+                >
+                  {l.charAt(0).toUpperCase() + l.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Launch button */}
           <button
             onClick={username ? handleLaunch : () => navigate('/login')}
@@ -464,7 +491,7 @@ export default function Home() {
                 <path d="M20 3H4v10c0 1.1.9 2 2 2h2v2H6v2h12v-2h-2v-2h2c1.1 0 2-.9 2-2V3zm-2 10H6V5h12v8z" />
               </svg>
             </NIcon>
-            <NIcon title="Mods (bientôt)" disabled>
+            <NIcon title="Mods" onClick={() => navigate('/mods')}>
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
                 <path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" />
               </svg>
