@@ -8,53 +8,91 @@ export function TitleBar() {
   const close = () => window.api?.close()
 
   return (
-    <div className="drag-region flex h-10 items-center justify-between border-b border-border bg-bg-secondary px-4">
+    <div
+      className="drag-region flex h-9 flex-shrink-0 items-center justify-between px-4"
+      style={{ background: '#09090D', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+    >
       {/* Logo */}
       <div className="no-drag flex items-center gap-2">
-        <div className="h-5 w-5 rounded-sm bg-accent" />
-        <span className="text-sm font-bold tracking-widest text-txt-primary">YUYUFRAME</span>
+        <div className="h-3.5 w-3.5 rounded-sm" style={{ background: '#4B3FCF' }} />
+        <span className="text-xs font-bold tracking-widest" style={{ color: 'rgba(255,255,255,0.5)', letterSpacing: '0.2em' }}>
+          YUYUFRAME
+        </span>
       </div>
 
-      {/* Center: user + theme */}
+      {/* Center: user info + theme toggle */}
       <div className="no-drag flex items-center gap-3">
         {username && (
-          <span className="text-xs text-txt-secondary">
-            Connecté en tant que <span className="text-accent font-medium">{username}</span>
+          <span className="text-xs" style={{ color: 'rgba(255,255,255,0.28)' }}>
+            {username}
           </span>
         )}
         <button
           onClick={toggleTheme}
-          className="rounded px-2 py-1 text-xs text-txt-secondary transition-theme hover:bg-bg-card hover:text-txt-primary"
+          className="rounded px-1.5 py-0.5 text-xs transition-all duration-150"
+          style={{ color: 'rgba(255,255,255,0.2)' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.2)' }}
         >
-          {theme === 'chill' ? '❄️ Chill' : '🎮 Gamer'}
+          {theme === 'chill' ? '❄️' : '🎮'}
         </button>
       </div>
 
       {/* Window controls */}
-      <div className="no-drag flex items-center gap-1">
+      <div className="no-drag flex items-center gap-0.5">
+        {/* Minimize — subtle red */}
         <button
           onClick={minimize}
-          className="flex h-7 w-7 items-center justify-center rounded text-txt-secondary transition hover:bg-bg-card hover:text-txt-primary"
+          className="flex h-7 w-7 items-center justify-center rounded transition-all duration-150"
+          style={{ color: 'rgba(190,70,70,0.45)' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(180,60,60,0.18)'
+            e.currentTarget.style.color = 'rgba(220,90,90,0.85)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'rgba(190,70,70,0.45)'
+          }}
         >
-          <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor">
-            <rect width="10" height="1" />
+          <svg width="10" height="2" viewBox="0 0 10 2" fill="currentColor">
+            <rect width="10" height="1.5" y="0.25" />
           </svg>
         </button>
+        {/* Maximize */}
         <button
           onClick={maximize}
-          className="flex h-7 w-7 items-center justify-center rounded text-txt-secondary transition hover:bg-bg-card hover:text-txt-primary"
+          className="flex h-7 w-7 items-center justify-center rounded transition-all duration-150"
+          style={{ color: 'rgba(255,255,255,0.18)' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.07)'
+            e.currentTarget.style.color = 'rgba(255,255,255,0.45)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'rgba(255,255,255,0.18)'
+          }}
         >
           <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1">
             <rect x="0.5" y="0.5" width="8" height="8" />
           </svg>
         </button>
+        {/* Close — vivid red */}
         <button
           onClick={close}
-          className="flex h-7 w-7 items-center justify-center rounded text-txt-secondary transition hover:bg-red-500 hover:text-white"
+          className="flex h-7 w-7 items-center justify-center rounded transition-all duration-150"
+          style={{ color: 'rgba(225,60,60,0.65)' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(220,45,45,0.22)'
+            e.currentTarget.style.color = 'rgb(245,80,80)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'rgba(225,60,60,0.65)'
+          }}
         >
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.2">
-            <line x1="0" y1="0" x2="9" y2="9" />
-            <line x1="9" y1="0" x2="0" y2="9" />
+          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <line x1="0.5" y1="0.5" x2="8.5" y2="8.5" />
+            <line x1="8.5" y1="0.5" x2="0.5" y2="8.5" />
           </svg>
         </button>
       </div>
