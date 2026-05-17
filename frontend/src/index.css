@@ -18,15 +18,15 @@
 
 /* ── Gamer theme ── */
 [data-theme='gamer'] {
-  --bg-primary: 8 8 8;
-  --bg-secondary: 18 8 8;
-  --bg-card: 26 12 12;
-  --accent: 239 68 68;
-  --accent-hover: 252 165 165;
+  --bg-primary: 12 12 14;
+  --bg-secondary: 19 19 21;
+  --bg-card: 30 30 35;
+  --accent: 68 62 185;
+  --accent-hover: 88 82 220;
   --txt-primary: 248 250 252;
-  --txt-secondary: 156 163 175;
-  --border: 60 20 20;
-  --glow: 239 68 68;
+  --txt-secondary: 148 163 184;
+  --border: 50 45 90;
+  --glow: 68 62 185;
 }
 
 * {

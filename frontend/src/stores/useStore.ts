@@ -21,6 +21,12 @@ interface Store {
   ram: number
   setRam: (r: number) => void
 
+  javaPath: string
+  setJavaPath: (p: string) => void
+
+  minecraftPath: string
+  setMinecraftPath: (p: string) => void
+
   gameRunning: boolean
   setGameRunning: (r: boolean) => void
 }
@@ -52,6 +58,12 @@ export const useStore = create<Store>()(
       ram: 4096,
       setRam: (ram) => set({ ram }),
 
+      javaPath: '',
+      setJavaPath: (javaPath) => set({ javaPath }),
+
+      minecraftPath: '',
+      setMinecraftPath: (minecraftPath) => set({ minecraftPath }),
+
       gameRunning: false,
       setGameRunning: (gameRunning) => set({ gameRunning }),
     }),
@@ -61,6 +73,8 @@ export const useStore = create<Store>()(
         theme: s.theme,
         selectedVersion: s.selectedVersion,
         ram: s.ram,
+        javaPath: s.javaPath,
+        minecraftPath: s.minecraftPath,
       }),
     }
   )
