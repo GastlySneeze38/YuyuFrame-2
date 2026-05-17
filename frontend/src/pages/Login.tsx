@@ -8,20 +8,23 @@ type Step = 'idle' | 'loading' | 'polling' | 'error'
 
 export default function Login() {
   const navigate = useNavigate()
-  const { uuid, accounts, addAccount, removeAccount, switchAccount } = useStore()
+  const { uuid, accounts, setAccounts, setUser, removeAccount } = useStore()
   const [step, setStep] = useState<Step>('idle')
   const [userCode, setUserCode] = useState('')
   const [verifyUrl, setVerifyUrl] = useState('')
   const [error, setError] = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Sync accounts from backend on mount
   useEffect(() => {
-    api.auth.status().then((s) => {
-      if (s.authenticated && s.username && s.uuid) {
-        addAccount(s.username, s.uuid)
-        navigate('/home', { replace: true })
-      }
-    }).catch(() => {})
+    api.mc.accounts()
+      .then((accs) => {
+        const mapped: Account[] = accs.map((a) => ({ username: a.mc_username, uuid: a.mc_uuid }))
+        setAccounts(mapped)
+        const active = accs.find((a) => a.is_active)
+        if (active) setUser(active.mc_username, active.mc_uuid)
+      })
+      .catch(() => {})
   }, [])
 
   const stopPolling = () => {
@@ -42,11 +45,13 @@ export default function Login() {
           const poll = await api.auth.poll()
           if (poll.status === 'success' && poll.username) {
             stopPolling()
-            const status = await api.auth.status()
-            if (status.uuid) {
-              addAccount(poll.username, status.uuid)
-              navigate('/home', { replace: true })
-            }
+            // Refresh account list from backend (backend already stored the session)
+            const accs = await api.mc.accounts()
+            const mapped: Account[] = accs.map((a) => ({ username: a.mc_username, uuid: a.mc_uuid }))
+            setAccounts(mapped)
+            const active = accs.find((a) => a.is_active)
+            if (active) setUser(active.mc_username, active.mc_uuid)
+            navigate('/home', { replace: true })
           } else if (poll.status === 'error') {
             stopPolling()
             setError(poll.error ?? 'Erreur inconnue')
@@ -60,12 +65,22 @@ export default function Login() {
     }
   }
 
-  useEffect(() => () => stopPolling(), [])
-
-  const handleSelect = (acc: Account) => {
-    switchAccount(acc.uuid)
-    navigate('/home')
+  const handleSelect = async (acc: Account) => {
+    try {
+      await api.mc.switch(acc.uuid)
+      setUser(acc.username, acc.uuid)
+      navigate('/home')
+    } catch { /* ignore */ }
   }
+
+  const handleRemove = async (acc: Account) => {
+    try {
+      await api.mc.delete(acc.uuid)
+      removeAccount(acc.uuid)
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => () => stopPolling(), [])
 
   return (
     <div className="flex h-full flex-col overflow-hidden" style={{ background: '#09090D' }}>
@@ -98,7 +113,7 @@ export default function Login() {
             Connexion
           </h1>
           <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.28)', marginTop: 1 }}>
-            Gérez vos comptes Minecraft
+            Gérez vos comptes Minecraft (max 2)
           </p>
         </div>
       </div>
@@ -131,11 +146,10 @@ export default function Login() {
               acc={acc}
               isActive={acc.uuid === uuid}
               onSelect={() => handleSelect(acc)}
-              onRemove={() => removeAccount(acc.uuid)}
+              onRemove={() => handleRemove(acc)}
             />
           ))}
 
-          {/* Add slot: visible only when < 2 accounts and not in polling */}
           {accounts.length < 2 && step === 'idle' && (
             <AddCard onClick={startLogin} />
           )}
@@ -156,9 +170,7 @@ export default function Login() {
                   className="h-4 w-4 animate-spin-slow rounded-full border-2"
                   style={{ borderColor: 'rgba(255,255,255,0.15)', borderTopColor: '#4B3FCF' }}
                 />
-                <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)' }}>
-                  Connexion en cours...
-                </span>
+                <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)' }}>Connexion en cours...</span>
               </div>
             )}
 
@@ -171,10 +183,7 @@ export default function Login() {
                   className="rounded-xl py-4 text-center"
                   style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
                 >
-                  <span
-                    className="font-mono font-black text-white"
-                    style={{ fontSize: 28, letterSpacing: '0.25em' }}
-                  >
+                  <span className="font-mono font-black text-white" style={{ fontSize: 28, letterSpacing: '0.25em' }}>
                     {userCode}
                   </span>
                 </div>
@@ -182,18 +191,9 @@ export default function Login() {
                   <button
                     onClick={() => window.api?.openExternal(verifyUrl)}
                     className="flex-1 rounded-xl py-2.5 text-sm font-medium text-white transition-all duration-150"
-                    style={{
-                      background: 'rgba(75,63,207,0.15)',
-                      border: '1px solid rgba(75,63,207,0.3)',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(75,63,207,0.3)'
-                      e.currentTarget.style.borderColor = 'rgba(75,63,207,0.55)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(75,63,207,0.15)'
-                      e.currentTarget.style.borderColor = 'rgba(75,63,207,0.3)'
-                    }}
+                    style={{ background: 'rgba(75,63,207,0.15)', border: '1px solid rgba(75,63,207,0.3)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.3)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.15)' }}
                   >
                     Ouvrir Microsoft →
                   </button>
@@ -231,33 +231,14 @@ export default function Login() {
                   onClick={() => setStep('idle')}
                   className="w-full rounded-xl py-2.5 text-sm transition-all duration-150"
                   style={{ color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(75,63,207,0.4)'
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.4)'
-                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.4)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'rgba(255,255,255,0.4)' }}
                 >
                   Réessayer
                 </button>
               </div>
             )}
           </div>
-        )}
-
-        {/* Add account button shown below when user has accounts but not in add-flow */}
-        {accounts.length > 0 && accounts.length < 2 && step !== 'idle' && (
-          <button
-            onClick={() => setStep('idle')}
-            style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}
-            className="transition-colors duration-150"
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.2)' }}
-          >
-            ← Annuler l'ajout de compte
-          </button>
         )}
       </div>
     </div>
@@ -281,26 +262,18 @@ function AccountCard({
         boxShadow: isActive ? '0 0 32px rgba(75,63,207,0.14)' : 'none',
       }}
     >
-      {/* Remove */}
       <button
         onClick={onRemove}
         className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-lg transition-all duration-150"
         style={{ color: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.04)' }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = 'rgba(252,165,165,0.85)'
-          e.currentTarget.style.background = 'rgba(200,50,50,0.14)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'rgba(255,255,255,0.18)'
-          e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(252,165,165,0.85)'; e.currentTarget.style.background = 'rgba(200,50,50,0.14)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.18)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
       >
         <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 11, height: 11 }}>
           <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
         </svg>
       </button>
 
-      {/* Avatar */}
       <div className="relative mt-2">
         <img
           src={`https://crafatar.com/avatars/${acc.uuid}?size=80&overlay`}
@@ -308,10 +281,9 @@ function AccountCard({
           className="rounded-xl"
           style={{ width: 80, height: 80, imageRendering: 'pixelated' }}
           onError={(e) => {
-            const el = e.currentTarget
-            el.style.display = 'none'
-            const fallback = el.nextElementSibling as HTMLElement | null
-            if (fallback) fallback.style.display = 'flex'
+            e.currentTarget.style.display = 'none'
+            const fb = e.currentTarget.nextElementSibling as HTMLElement | null
+            if (fb) fb.style.display = 'flex'
           }}
         />
         <div
@@ -328,7 +300,6 @@ function AccountCard({
         )}
       </div>
 
-      {/* Name */}
       <div className="text-center">
         <p className="font-bold text-white" style={{ fontSize: 14 }}>{acc.username}</p>
         <p style={{ fontSize: 10, marginTop: 2, color: isActive ? 'rgba(74,222,128,0.7)' : 'rgba(255,255,255,0.25)' }}>
@@ -336,23 +307,13 @@ function AccountCard({
         </p>
       </div>
 
-      {/* Action */}
       {isActive ? (
         <button
           onClick={onSelect}
           className="w-full rounded-xl py-2 text-sm font-medium text-white transition-all duration-150"
-          style={{
-            background: 'rgba(75,63,207,0.25)',
-            border: '1px solid rgba(75,63,207,0.45)',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(75,63,207,0.42)'
-            e.currentTarget.style.borderColor = 'rgba(75,63,207,0.7)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(75,63,207,0.25)'
-            e.currentTarget.style.borderColor = 'rgba(75,63,207,0.45)'
-          }}
+          style={{ background: 'rgba(75,63,207,0.25)', border: '1px solid rgba(75,63,207,0.45)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.42)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.25)' }}
         >
           Jouer →
         </button>
@@ -361,14 +322,8 @@ function AccountCard({
           onClick={onSelect}
           className="w-full rounded-xl py-2 text-sm transition-all duration-150"
           style={{ color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.08)' }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(75,63,207,0.45)'
-            e.currentTarget.style.color = 'rgba(255,255,255,0.9)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-            e.currentTarget.style.color = 'rgba(255,255,255,0.45)'
-          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.45)'; e.currentTarget.style.color = 'rgba(255,255,255,0.9)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'rgba(255,255,255,0.45)' }}
         >
           Sélectionner
         </button>

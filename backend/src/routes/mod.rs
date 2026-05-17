@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod launch;
+pub mod mc;
 pub mod versions;
+pub mod yuyu;
 
 use axum::Json;
 use serde::Serialize;

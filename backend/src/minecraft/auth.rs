@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
-use std::path::PathBuf;
 
 use crate::state::MinecraftSession;
 
@@ -12,6 +11,8 @@ const XBL_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
 const XSTS_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
 const MC_AUTH_URL: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
 const MC_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
+
+// ── Response types ────────────────────────────────────────────────────────────
 
 pub struct DeviceCodeResponse {
     pub device_code: String,
@@ -70,58 +71,20 @@ struct McProfileResp {
     name: String,
 }
 
-pub async fn start_device_auth() -> Result<DeviceCodeResponse> {
-    let client = reqwest::Client::new();
-    let params = [
-        ("client_id", MS_CLIENT_ID),
-        ("scope", "XboxLive.signin offline_access"),
-    ];
-    let resp: MsDeviceCodeResp = client
-        .post(DEVICE_CODE_URL)
-        .form(&params)
-        .send()
-        .await?
-        .json()
-        .await?;
-    Ok(DeviceCodeResponse {
-        device_code: resp.device_code,
-        user_code: resp.user_code,
-        verification_uri: resp.verification_uri,
-        expires_in: resp.expires_in,
-    })
-}
+// ── Shared Xbox auth chain ────────────────────────────────────────────────────
 
-pub async fn poll_device_auth(device_code: &str) -> Result<Option<MinecraftSession>> {
-    let client = reqwest::Client::new();
-    let params = [
-        ("client_id", MS_CLIENT_ID),
-        ("device_code", device_code),
-        ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-    ];
-    let resp: MsTokenResp = client
-        .post(TOKEN_URL)
-        .form(&params)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    if let Some(err) = resp.error {
-        if err == "authorization_pending" {
-            return Ok(None);
-        }
-        return Err(anyhow!("Auth error: {}", err));
-    }
-
-    let ms_token = resp.access_token.ok_or_else(|| anyhow!("No access token"))?;
-    let refresh_token = resp.refresh_token;
-
+/// Exchange a Microsoft access token for a Minecraft access token + profile.
+/// Returns (mc_access_token, mc_username, mc_uuid).
+async fn xbox_auth_chain(
+    client: &reqwest::Client,
+    ms_access_token: &str,
+) -> Result<(String, String, String)> {
     // Xbox Live
     let xbl_body = serde_json::json!({
         "Properties": {
             "AuthMethod": "RPS",
             "SiteName": "user.auth.xboxlive.com",
-            "RpsTicket": format!("d={}", ms_token)
+            "RpsTicket": format!("d={}", ms_access_token)
         },
         "RelyingParty": "http://auth.xboxlive.com",
         "TokenType": "JWT"
@@ -139,7 +102,7 @@ pub async fn poll_device_auth(device_code: &str) -> Result<Option<MinecraftSessi
         .display_claims
         .xui
         .first()
-        .ok_or_else(|| anyhow!("No userhash"))?
+        .ok_or_else(|| anyhow!("No userhash in XBL response"))?
         .uhs
         .clone();
 
@@ -182,42 +145,119 @@ pub async fn poll_device_auth(device_code: &str) -> Result<Option<MinecraftSessi
         .json()
         .await?;
 
+    Ok((mc_resp.access_token, profile.name, profile.id))
+}
+
+// ── Device code flow ──────────────────────────────────────────────────────────
+
+pub async fn start_device_auth() -> Result<DeviceCodeResponse> {
+    let client = reqwest::Client::new();
+    let params = [
+        ("client_id", MS_CLIENT_ID),
+        ("scope", "XboxLive.signin offline_access"),
+    ];
+    let resp: MsDeviceCodeResp = client
+        .post(DEVICE_CODE_URL)
+        .form(&params)
+        .send()
+        .await?
+        .json()
+        .await?;
+    Ok(DeviceCodeResponse {
+        device_code: resp.device_code,
+        user_code: resp.user_code,
+        verification_uri: resp.verification_uri,
+        expires_in: resp.expires_in,
+    })
+}
+
+/// Polls Microsoft. Returns None if still pending, Some(session) on success.
+pub async fn poll_device_auth(device_code: &str) -> Result<Option<MinecraftSession>> {
+    let client = reqwest::Client::new();
+    let params = [
+        ("client_id", MS_CLIENT_ID),
+        ("device_code", device_code),
+        ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+    ];
+    let resp: MsTokenResp = client
+        .post(TOKEN_URL)
+        .form(&params)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(err) = resp.error {
+        if err == "authorization_pending" {
+            return Ok(None);
+        }
+        return Err(anyhow!("Auth error: {}", err));
+    }
+
+    let ms_access_token = resp
+        .access_token
+        .ok_or_else(|| anyhow!("No MS access token"))?;
+    let ms_refresh_token = resp.refresh_token;
+
+    let (mc_access_token, mc_username, mc_uuid) =
+        xbox_auth_chain(&client, &ms_access_token).await?;
+
     Ok(Some(MinecraftSession {
-        username: profile.name,
-        uuid: profile.id,
-        access_token: mc_resp.access_token,
-        refresh_token,
+        username: mc_username,
+        uuid: mc_uuid,
+        access_token: mc_access_token,
+        refresh_token: ms_refresh_token,
         expires_at: chrono::Utc::now().timestamp() + 86400,
     }))
 }
 
-fn session_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("YuyuFrame")
-        .join("session.json")
-}
+// ── Token refresh ─────────────────────────────────────────────────────────────
 
-pub async fn save_session(session: &MinecraftSession) -> Result<()> {
-    let path = session_path();
-    tokio::fs::create_dir_all(path.parent().unwrap()).await?;
-    tokio::fs::write(path, serde_json::to_string_pretty(session)?).await?;
-    Ok(())
-}
+/// Use a Microsoft refresh token to get a new Minecraft session.
+/// Returns (mc_access_token, mc_username, mc_uuid, new_ms_refresh_token, new_expires_at).
+pub async fn refresh_session(
+    ms_refresh_token: &str,
+) -> Result<(String, String, String, String, i64)> {
+    let client = reqwest::Client::new();
 
-pub async fn load_session() -> Result<MinecraftSession> {
-    let json = tokio::fs::read_to_string(session_path()).await?;
-    let session: MinecraftSession = serde_json::from_str(&json)?;
-    if session.expires_at < chrono::Utc::now().timestamp() {
-        return Err(anyhow!("Session expired"));
+    // Exchange refresh token for new MS access token
+    let params = [
+        ("client_id", MS_CLIENT_ID),
+        ("refresh_token", ms_refresh_token),
+        ("grant_type", "refresh_token"),
+        ("scope", "XboxLive.signin offline_access"),
+    ];
+    let resp: MsTokenResp = client
+        .post(TOKEN_URL)
+        .form(&params)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(err) = resp.error {
+        return Err(anyhow!("MS refresh error: {}", err));
     }
-    Ok(session)
-}
 
-pub async fn delete_session() -> Result<()> {
-    let path = session_path();
-    if path.exists() {
-        tokio::fs::remove_file(path).await?;
-    }
-    Ok(())
+    let ms_access_token = resp
+        .access_token
+        .ok_or_else(|| anyhow!("No MS access token from refresh"))?;
+
+    // Keep old refresh token if Microsoft didn't issue a new one
+    let new_ms_refresh_token = resp
+        .refresh_token
+        .unwrap_or_else(|| ms_refresh_token.to_string());
+
+    let (mc_access_token, mc_username, mc_uuid) =
+        xbox_auth_chain(&client, &ms_access_token).await?;
+
+    let expires_at = chrono::Utc::now().timestamp() + 86400;
+
+    Ok((
+        mc_access_token,
+        mc_username,
+        mc_uuid,
+        new_ms_refresh_token,
+        expires_at,
+    ))
 }

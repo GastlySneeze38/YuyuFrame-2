@@ -1,11 +1,12 @@
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
+mod db;
 mod minecraft;
 mod routes;
 mod state;
@@ -14,13 +15,18 @@ mod state;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let app_state = Arc::new(RwLock::new(state::AppState::default()));
+    // Initialise SQLite database
+    let conn = db::init_db().expect("Impossible d'initialiser la base de données");
+    tracing::info!("Base de données SQLite initialisée");
 
-    // Restore session from disk if available
-    if let Ok(session) = minecraft::auth::load_session().await {
-        tracing::info!("Session restaurée pour {}", session.username);
-        app_state.write().await.session = Some(session);
-    }
+    let app_state = Arc::new(RwLock::new(state::AppState {
+        db: Arc::new(Mutex::new(conn)),
+        yuyu_session: None,
+        session: None,
+        download_progress: None,
+        game_running: false,
+        auth_device_code: None,
+    }));
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -28,12 +34,24 @@ async fn main() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = Router::new()
+        // Public
         .route("/api/health", get(routes::health))
         .route("/api/versions", get(routes::versions::list_versions))
+        // YuyuFrame account (no auth required)
+        .route("/api/yuyu/status", get(routes::yuyu::status))
+        .route("/api/yuyu/register", post(routes::yuyu::register))
+        .route("/api/yuyu/login", post(routes::yuyu::login))
+        .route("/api/yuyu/logout", post(routes::yuyu::logout))
+        // Microsoft / Minecraft auth (yuyu token required)
         .route("/api/auth/device", post(routes::auth::start_device_auth))
         .route("/api/auth/poll", get(routes::auth::poll_auth))
         .route("/api/auth/status", get(routes::auth::auth_status))
         .route("/api/auth/logout", post(routes::auth::logout))
+        // Minecraft account management (yuyu token required)
+        .route("/api/mc/accounts", get(routes::mc::list_accounts))
+        .route("/api/mc/switch", post(routes::mc::switch_account))
+        .route("/api/mc/account/:uuid", delete(routes::mc::delete_account))
+        // Game
         .route("/api/launch", post(routes::launch::launch_game))
         .route("/api/launch/progress", get(routes::launch::download_progress))
         .layer(cors)
