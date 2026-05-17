@@ -3,10 +3,10 @@ use serde::Deserialize;
 
 use crate::state::MinecraftSession;
 
-const MS_CLIENT_ID: &str = "00000000402b5328";
-const DEVICE_CODE_URL: &str =
-    "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
-const TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+const MS_CLIENT_ID: &str = "00000000402B5328";
+const MS_REDIRECT_URI: &str = "https://login.live.com/oauth20_desktop.srf";
+const DEVICE_CODE_URL: &str = "https://login.live.com/oauth20_connect.srf";
+const TOKEN_URL: &str = "https://login.live.com/oauth20_token.srf";
 const XBL_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
 const XSTS_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
 const MC_AUTH_URL: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
@@ -156,6 +156,8 @@ pub async fn start_device_auth() -> Result<DeviceCodeResponse> {
     let params = [
         ("client_id", MS_CLIENT_ID),
         ("scope", "XboxLive.signin offline_access"),
+        ("redirect_uri", MS_REDIRECT_URI),
+        ("response_type", "device_code"),
     ];
     let raw = client
         .post(DEVICE_CODE_URL)
@@ -182,6 +184,7 @@ pub async fn poll_device_auth(device_code: &str) -> Result<Option<MinecraftSessi
         ("client_id", MS_CLIENT_ID),
         ("device_code", device_code),
         ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+        ("redirect_uri", MS_REDIRECT_URI),
     ];
     let raw = client
         .post(TOKEN_URL)
@@ -233,6 +236,7 @@ pub async fn refresh_session(
         ("refresh_token", ms_refresh_token),
         ("grant_type", "refresh_token"),
         ("scope", "XboxLive.signin offline_access"),
+        ("redirect_uri", MS_REDIRECT_URI),
     ];
     let raw = client
         .post(TOKEN_URL)
