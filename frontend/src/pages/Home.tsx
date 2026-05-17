@@ -197,34 +197,45 @@ export default function Home() {
             YuyuFrame
           </h1>
 
-          {/* Avatar */}
-          <div className="flex flex-col items-center gap-1.5">
+          {/* Avatar / Connect */}
+          <div className="flex flex-col items-center gap-2">
             {username ? (
-              <>
-                {uuid ? (
-                  <img
-                    src={`https://crafatar.com/avatars/${uuid}?size=100&overlay`}
-                    alt={username}
-                    className="rounded-xl"
-                    style={{
-                      width: 100, height: 100,
-                      imageRendering: 'pixelated',
-                      boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
-                    }}
-                    onError={(e) => { e.currentTarget.style.display = 'none' }}
-                  />
-                ) : (
-                  <div
-                    className="flex items-center justify-center rounded-xl font-black text-white text-4xl"
-                    style={{ width: 100, height: 100, background: 'rgba(75,63,207,0.55)', fontFamily: 'monospace' }}
-                  >
-                    {username[0].toUpperCase()}
+              <button
+                onClick={() => navigate('/login')}
+                className="flex flex-col items-center gap-2 group"
+                title="Gérer les comptes"
+              >
+                <div className="relative">
+                  {uuid ? (
+                    <img
+                      src={`https://crafatar.com/avatars/${uuid}?size=100&overlay`}
+                      alt={username}
+                      className="rounded-xl transition-all duration-200 group-hover:brightness-75"
+                      style={{
+                        width: 100, height: 100,
+                        imageRendering: 'pixelated',
+                        boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
+                      }}
+                      onError={(e) => { e.currentTarget.style.display = 'none' }}
+                    />
+                  ) : (
+                    <div
+                      className="flex items-center justify-center rounded-xl font-black text-white text-4xl transition-all duration-200 group-hover:brightness-75"
+                      style={{ width: 100, height: 100, background: 'rgba(75,63,207,0.55)', fontFamily: 'monospace' }}
+                    >
+                      {username[0].toUpperCase()}
+                    </div>
+                  )}
+                  <div className="absolute inset-0 flex items-center justify-center rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                    <svg viewBox="0 0 24 24" fill="white" style={{ width: 24, height: 24, opacity: 0.9 }}>
+                      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                    </svg>
                   </div>
-                )}
+                </div>
                 <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>
                   {username}
                 </span>
-              </>
+              </button>
             ) : (
               <button
                 onClick={() => navigate('/login')}

@@ -180,14 +180,19 @@ export default function Login() {
                 <p className="text-center" style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
                   Entre ce code sur la page Microsoft :
                 </p>
-                <div
-                  className="rounded-xl py-4 text-center"
-                  style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
+                <button
+                  onClick={() => { navigator.clipboard.writeText(userCode); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+                  className="rounded-xl py-4 text-center transition-all duration-150"
+                  style={{ background: copied ? 'rgba(74,222,128,0.08)' : 'rgba(0,0,0,0.4)', border: `1px solid ${copied ? 'rgba(74,222,128,0.3)' : 'rgba(255,255,255,0.08)'}` }}
+                  title="Cliquer pour copier"
                 >
                   <span className="font-mono font-black text-white" style={{ fontSize: 28, letterSpacing: '0.25em' }}>
                     {userCode}
                   </span>
-                </div>
+                  <p style={{ fontSize: 10, marginTop: 4, color: copied ? 'rgb(134,239,172)' : 'rgba(255,255,255,0.2)' }}>
+                    {copied ? 'Copié !' : 'Cliquer pour copier'}
+                  </p>
+                </button>
                 <div className="flex gap-2">
                   <button
                     onClick={() => window.api?.openExternal(verifyUrl)}

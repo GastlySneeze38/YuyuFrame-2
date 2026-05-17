@@ -63,6 +63,8 @@ pub struct Artifact {
     pub url: String,
     pub sha1: String,
     pub size: u64,
+    /// Relative path inside the libraries directory (e.g. "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-windows.jar")
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,11 +72,16 @@ pub struct Library {
     pub name: String,
     pub downloads: Option<LibraryDownloads>,
     pub rules: Option<Vec<serde_json::Value>>,
+    /// Old format: maps OS name → classifier key (e.g. "windows" → "natives-windows")
+    pub natives: Option<HashMap<String, String>>,
+    pub extract: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LibraryDownloads {
     pub artifact: Option<Artifact>,
+    /// Old format native JARs keyed by classifier ("natives-windows", etc.)
+    pub classifiers: Option<HashMap<String, Artifact>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

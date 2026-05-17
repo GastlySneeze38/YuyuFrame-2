@@ -4,7 +4,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::state::{DownloadProgress, MinecraftSession, SharedState};
 use super::versions::{
-    fetch_asset_index, fetch_version_details, fetch_version_list, Library, VersionDetails,
+    fetch_asset_index, fetch_version_details, fetch_version_list, Artifact, Library, VersionDetails,
 };
 
 fn minecraft_dir() -> PathBuf {
@@ -60,21 +60,46 @@ pub async fn download_and_launch(
     set_progress(&state, 20, 100, "Téléchargement des bibliothèques...").await;
     let mut classpath = vec![client_jar.to_string_lossy().to_string()];
     let total_libs = details.libraries.len() as u64;
+    let os_key = if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "osx" } else { "linux" };
 
     for (i, lib) in details.libraries.iter().enumerate() {
         if !should_download_library(lib) {
             continue;
         }
         if let Some(ref dl) = lib.downloads {
+            // ── Main artifact ──────────────────────────────────────────────────
             if let Some(ref artifact) = dl.artifact {
-                let lib_path = library_jar_path(&libraries_dir, &lib.name);
+                let lib_path = artifact_path(&libraries_dir, artifact, &lib.name);
                 if let Some(parent) = lib_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
                 if !lib_path.exists() {
                     download_file(&artifact.url, &lib_path).await?;
                 }
-                classpath.push(lib_path.to_string_lossy().to_string());
+                // Native JARs (new format, name contains ":natives-") → also extract
+                if lib.name.contains(":natives-") {
+                    extract_natives(&lib_path, &natives_dir).await.ok();
+                } else {
+                    classpath.push(lib_path.to_string_lossy().to_string());
+                }
+            }
+
+            // ── Classifiers (old format) ───────────────────────────────────────
+            if let (Some(ref natives_map), Some(ref classifiers)) = (&lib.natives, &dl.classifiers) {
+                if let Some(classifier_key) = natives_map.get(os_key) {
+                    // Strip optional ${arch} suffix some old versions use
+                    let key = classifier_key.replace("${arch}", if cfg!(target_pointer_width = "64") { "64" } else { "32" });
+                    if let Some(native_artifact) = classifiers.get(&key) {
+                        let native_path = artifact_path(&libraries_dir, native_artifact, &format!("{}:{}", lib.name, key));
+                        if let Some(parent) = native_path.parent() {
+                            tokio::fs::create_dir_all(parent).await?;
+                        }
+                        if !native_path.exists() {
+                            download_file(&native_artifact.url, &native_path).await?;
+                        }
+                        extract_natives(&native_path, &natives_dir).await.ok();
+                    }
+                }
             }
         }
         if i as u64 % 10 == 0 {
@@ -186,8 +211,16 @@ fn should_download_library(lib: &Library) -> bool {
     allowed
 }
 
+/// Use artifact.path when available (always correct), otherwise derive from Maven name.
+fn artifact_path(base: &PathBuf, artifact: &Artifact, name: &str) -> PathBuf {
+    if let Some(ref p) = artifact.path {
+        return base.join(p);
+    }
+    library_jar_path(base, name)
+}
+
 fn library_jar_path(base: &PathBuf, name: &str) -> PathBuf {
-    // "group.id:artifact:version"
+    // "group:artifact:version" or "group:artifact:version:classifier"
     let parts: Vec<&str> = name.split(':').collect();
     if parts.len() < 3 {
         return base.join(name);
@@ -195,10 +228,44 @@ fn library_jar_path(base: &PathBuf, name: &str) -> PathBuf {
     let group_path = parts[0].replace('.', "/");
     let artifact = parts[1];
     let version = parts[2];
-    base.join(group_path)
-        .join(artifact)
-        .join(version)
-        .join(format!("{}-{}.jar", artifact, version))
+    let classifier = parts.get(3).copied().unwrap_or("");
+    let filename = if classifier.is_empty() {
+        format!("{}-{}.jar", artifact, version)
+    } else {
+        format!("{}-{}-{}.jar", artifact, version, classifier)
+    };
+    base.join(group_path).join(artifact).join(version).join(filename)
+}
+
+/// Extract DLLs/SOs from a native JAR into the natives directory, skipping META-INF.
+async fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> Result<()> {
+    let jar_bytes = tokio::fs::read(jar_path).await?;
+    let cursor = std::io::Cursor::new(jar_bytes);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let name = entry.name().to_string();
+        if name.starts_with("META-INF") || name.ends_with('/') {
+            continue;
+        }
+        // Only extract native files (.dll, .so, .dylib, .jnilib)
+        let is_native = name.ends_with(".dll") || name.ends_with(".so")
+            || name.ends_with(".dylib") || name.ends_with(".jnilib");
+        if !is_native {
+            continue;
+        }
+        let file_name = std::path::Path::new(&name)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let out_path = natives_dir.join(&file_name);
+        if !out_path.exists() {
+            let mut out = std::fs::File::create(&out_path)?;
+            std::io::copy(&mut entry, &mut out)?;
+        }
+    }
+    Ok(())
 }
 
 fn build_game_args(
