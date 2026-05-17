@@ -1,18 +1,9 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
-use std::path::PathBuf;
-
-fn db_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("YuyuFrame")
-        .join("yuyu.db")
-}
 
 pub fn init_db() -> Result<Connection> {
-    let path = db_path();
-    std::fs::create_dir_all(path.parent().unwrap())?;
-    let conn = Connection::open(&path)?;
+    let conn = Connection::open("yuyu.db")?;
+    tracing::info!("Base de données : yuyu.db ({})", std::env::current_dir().unwrap_or_default().display());
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
