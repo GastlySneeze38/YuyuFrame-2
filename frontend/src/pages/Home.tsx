@@ -358,8 +358,8 @@ export default function Home() {
 
       {/* ── Footer ── */}
       <div
-        className="flex flex-shrink-0 overflow-hidden"
-        style={{ background: '#09090D', borderTop: '1px solid rgba(255,255,255,0.05)' }}
+        className="flex overflow-hidden"
+        style={{ flexShrink: 0, flexBasis: '30%', background: '#09090D', borderTop: '1px solid rgba(255,255,255,0.05)' }}
       >
         {/* Left: legal links */}
         <div
