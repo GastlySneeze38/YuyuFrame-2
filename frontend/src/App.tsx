@@ -8,6 +8,7 @@ import Mods from '@/pages/Mods'
 import Settings from '@/pages/Settings'
 import Information from '@/pages/Information'
 import YuyuLogin from '@/pages/YuyuLogin'
+import Console from '@/pages/Console'
 import { useStore } from '@/stores/useStore'
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -37,6 +38,7 @@ export default function App() {
         <Routes>
           {/* YuyuFrame account gate — always accessible */}
           <Route path="/yuyu" element={<YuyuLogin />} />
+          <Route path="/console" element={<Console />} />
 
           {/* Protected routes */}
           <Route

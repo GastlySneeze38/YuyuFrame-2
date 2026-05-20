@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
+use std::process::Stdio;
 use tauri::Emitter;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::state::{DownloadProgress, MinecraftSession, SharedState};
 use super::fabric;
@@ -205,7 +206,36 @@ pub async fn download_and_launch(
     let mut child = tokio::process::Command::new(&java)
         .args(&args)
         .current_dir(&mc_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
         .spawn()?;
+
+    let stdout = child.stdout.take().map(BufReader::new);
+    let stderr = child.stderr.take().map(BufReader::new);
+
+    let app_out = app.clone();
+    let app_err = app.clone();
+
+    if let Some(mut reader) = stdout {
+        tokio::spawn(async move {
+            let mut line = String::new();
+            while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
+                let _ = app_out.emit("game_log", serde_json::json!({ "line": line.trim_end(), "level": "out" }));
+                line.clear();
+            }
+        });
+    }
+
+    if let Some(mut reader) = stderr {
+        tokio::spawn(async move {
+            let mut line = String::new();
+            while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
+                let _ = app_err.emit("game_log", serde_json::json!({ "line": line.trim_end(), "level": "err" }));
+                line.clear();
+            }
+        });
+    }
 
     // Clear progress — game is now running
     state.write().await.download_progress = None;

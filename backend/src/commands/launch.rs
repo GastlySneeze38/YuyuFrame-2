@@ -1,4 +1,4 @@
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::commands::instances::instance_dir;
 use crate::db;
@@ -37,6 +37,20 @@ pub async fn launch_game(
 
     let game_dir = instance_dir(&instance_id);
     tokio::fs::create_dir_all(&game_dir).await.map_err(|e| e.to_string())?;
+
+    // Open or reopen the console window
+    if let Some(existing) = app.get_webview_window("minecraft-console") {
+        let _ = existing.close();
+    }
+    let _ = tauri::WebviewWindowBuilder::new(
+        &app,
+        "minecraft-console",
+        tauri::WebviewUrl::App(std::path::PathBuf::from("#/console")),
+    )
+    .title("Console Minecraft")
+    .inner_size(960.0, 620.0)
+    .decorations(false)
+    .build();
 
     let state_clone = state.inner().clone();
 
