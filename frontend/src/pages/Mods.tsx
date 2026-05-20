@@ -42,9 +42,10 @@ async function fetchModrinthSearch(
   gameVersion: string,
   loader: string,
 ): Promise<ModrinthHit[]> {
-  const facets: string[][] = [['project_type:mod']]
+  const isPlugin = loader === 'vanilla'
+  const facets: string[][] = [[`project_type:${isPlugin ? 'plugin' : 'mod'}`]]
   if (gameVersion) facets.push([`versions:${gameVersion}`])
-  if (loader && loader !== 'vanilla') facets.push([`categories:${loader}`])
+  if (!isPlugin) facets.push([`categories:${loader}`])
 
   const params = new URLSearchParams({
     query,
@@ -86,6 +87,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
   const instanceId = instance.id
   const mcVersion = instance.mc_version
   const loader = instance.loader
+  const isPlugin = loader === 'vanilla'
 
   const [tab, setTab] = useState<Tab>('installed')
   const [mods, setMods] = useState<Mod[]>([])
@@ -214,7 +216,9 @@ export function ModsContent({ instance }: { instance: Instance }) {
                 border: `1px solid ${tab === t ? 'rgba(75,63,207,0.5)' : 'transparent'}`,
               }}
             >
-              {t === 'installed' ? `Installés (${mods.length})` : 'Parcourir Modrinth'}
+              {t === 'installed'
+                ? `Installés (${mods.length})`
+                : isPlugin ? 'Parcourir les plugins' : 'Parcourir Modrinth'}
             </button>
           ))}
         </div>
@@ -240,7 +244,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
                 <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
                   <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
                 </svg>
-                {uploading ? 'Import...' : 'Importer'}
+                {uploading ? 'Import...' : isPlugin ? 'Importer un plugin' : 'Importer un mod'}
               </button>
               <input ref={fileInputRef} type="file" accept=".jar" className="hidden" onChange={handleFileChange} />
             </>
@@ -255,6 +259,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
             mods={mods}
             loading={loadingMods}
             error={modsError}
+            isPlugin={isPlugin}
             onReload={loadMods}
             onToggle={handleToggle}
             onDelete={handleDelete}
@@ -267,6 +272,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
             error={searchError}
             installing={installing}
             isInstalled={isInstalled}
+            isPlugin={isPlugin}
             onQueryChange={handleQueryChange}
             onInstall={handleInstall}
           />
@@ -326,11 +332,12 @@ export default function Mods() {
 // ── Installed tab ─────────────────────────────────────────────────────────────
 
 function InstalledTab({
-  mods, loading, error, onReload, onToggle, onDelete,
+  mods, loading, error, isPlugin, onReload, onToggle, onDelete,
 }: {
   mods: Mod[]
   loading: boolean
   error: string
+  isPlugin: boolean
   onReload: () => void
   onToggle: (mod: Mod) => void
   onDelete: (name: string) => void
@@ -340,8 +347,10 @@ function InstalledTab({
   if (mods.length === 0) return (
     <EmptyState
       icon={<PlugIcon size={28} color="rgba(75,63,207,0.55)" />}
-      title="Aucun mod installé"
-      subtitle={'Cliquez sur "Importer" ou parcourez Modrinth'}
+      title={isPlugin ? 'Aucun plugin installé' : 'Aucun mod installé'}
+      subtitle={isPlugin
+        ? 'Importez un .jar ou parcourez les plugins'
+        : 'Cliquez sur "Importer un mod" ou parcourez Modrinth'}
     />
   )
   return (
@@ -356,7 +365,7 @@ function InstalledTab({
 // ── Browse tab ────────────────────────────────────────────────────────────────
 
 function BrowseTab({
-  query, results, searching, error, installing, isInstalled,
+  query, results, searching, error, installing, isInstalled, isPlugin,
   onQueryChange, onInstall,
 }: {
   query: string
@@ -365,6 +374,7 @@ function BrowseTab({
   error: string
   installing: string | null
   isInstalled: (slug: string) => boolean
+  isPlugin: boolean
   onQueryChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   onInstall: (hit: ModrinthHit) => void
 }) {
@@ -378,7 +388,7 @@ function BrowseTab({
         </svg>
         <input
           type="text"
-          placeholder="Rechercher un mod..."
+          placeholder={isPlugin ? 'Rechercher un plugin...' : 'Rechercher un mod...'}
           value={query}
           onChange={onQueryChange}
           className="w-full rounded-xl pl-9 pr-4 text-sm text-white outline-none"
@@ -398,7 +408,9 @@ function BrowseTab({
         <EmptyState
           icon={<SearchIcon size={28} color="rgba(255,255,255,0.15)" />}
           title="Aucun résultat"
-          subtitle="Essayez un autre terme ou changez la version MC"
+          subtitle={isPlugin
+            ? 'Essayez un autre terme de recherche'
+            : 'Essayez un autre terme ou changez la version MC'}
         />
       )}
 
