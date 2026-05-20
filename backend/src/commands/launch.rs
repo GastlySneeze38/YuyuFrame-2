@@ -1,5 +1,6 @@
 use tauri::Emitter;
 
+use crate::commands::instances::{instance_dir, load_instances_pub};
 use crate::minecraft::launcher;
 use crate::state::SharedState;
 
@@ -7,9 +8,7 @@ use crate::state::SharedState;
 pub async fn launch_game(
     state: tauri::State<'_, SharedState>,
     app: tauri::AppHandle,
-    version: String,
-    ram: Option<u32>,
-    loader: Option<String>,
+    instance_id: String,
 ) -> Result<(), String> {
     let session = {
         let s = state.read().await;
@@ -20,19 +19,27 @@ pub async fn launch_game(
         return Err("Le jeu est déjà en cours".into());
     }
 
+    let instances = load_instances_pub();
+    let instance = instances
+        .into_iter()
+        .find(|i| i.id == instance_id)
+        .ok_or("Instance introuvable")?;
+
+    let game_dir = instance_dir(&instance_id);
+    tokio::fs::create_dir_all(&game_dir).await.map_err(|e| e.to_string())?;
+
     let state_clone = state.inner().clone();
-    let ram = ram.unwrap_or(4096);
-    let loader = loader.unwrap_or_else(|| "vanilla".to_string());
 
     tokio::spawn(async move {
         state_clone.write().await.game_running = true;
         let _ = app.emit("game_state", serde_json::json!({ "running": true }));
 
         if let Err(e) = launcher::download_and_launch(
-            &version,
-            Some(&loader),
+            &instance.mc_version,
+            Some(&instance.loader),
             &session,
-            ram,
+            instance.ram_mb,
+            &game_dir,
             app.clone(),
             state_clone.clone(),
         )

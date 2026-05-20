@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Loader, Theme, Version, Account } from '@/types'
+import type { Instance, Theme, Version, Account } from '@/types'
 
 interface Store {
   // ── YuyuFrame session (NOT persisted — requires password on each start) ──
@@ -20,22 +20,27 @@ interface Store {
   setUser: (username: string, uuid: string) => void
   clearUser: () => void
 
-  // ── Minecraft account list (synced from backend after yuyu login) ──────────
+  // ── Minecraft account list ─────────────────────────────────────────────────
   accounts: Account[]
   setAccounts: (accounts: Account[]) => void
   addAccount: (username: string, uuid: string) => void
   removeAccount: (uuid: string) => void
   switchAccount: (uuid: string) => void
 
-  // ── Versions ───────────────────────────────────────────────────────────────
+  // ── Versions (for instance creation) ──────────────────────────────────────
   versions: Version[]
   setVersions: (v: Version[]) => void
 
-  selectedVersion: string
-  setSelectedVersion: (v: string) => void
+  // ── Instances ─────────────────────────────────────────────────────────────
+  instances: Instance[]
+  setInstances: (instances: Instance[]) => void
+  addInstance: (instance: Instance) => void
+  updateInstance: (instance: Instance) => void
+  removeInstance: (id: string) => void
 
-  selectedLoader: Loader
-  setSelectedLoader: (l: Loader) => void
+  selectedInstanceId: string | null
+  setSelectedInstanceId: (id: string | null) => void
+  selectedInstance: () => Instance | null
 
   // ── Settings (persisted) ──────────────────────────────────────────────────
   ram: number
@@ -61,12 +66,9 @@ export const useStore = create<Store>()(
       // YuyuFrame session
       yuyuToken: null,
       yuyuUsername: null,
-      setYuyuSession: (token, username) => {
-        set({ yuyuToken: token, yuyuUsername: username })
-      },
-      clearYuyuSession: () => {
-        set({ yuyuToken: null, yuyuUsername: null, accounts: [], username: null, uuid: null })
-      },
+      setYuyuSession: (token, username) => set({ yuyuToken: token, yuyuUsername: username }),
+      clearYuyuSession: () =>
+        set({ yuyuToken: null, yuyuUsername: null, accounts: [], username: null, uuid: null }),
 
       // Theme
       theme: 'chill',
@@ -117,11 +119,26 @@ export const useStore = create<Store>()(
       versions: [],
       setVersions: (versions) => set({ versions }),
 
-      selectedVersion: '',
-      setSelectedVersion: (selectedVersion) => set({ selectedVersion }),
+      // Instances
+      instances: [],
+      setInstances: (instances) => set({ instances }),
+      addInstance: (instance) => set((s) => ({ instances: [...s.instances, instance] })),
+      updateInstance: (instance) =>
+        set((s) => ({
+          instances: s.instances.map((i) => (i.id === instance.id ? instance : i)),
+        })),
+      removeInstance: (id) =>
+        set((s) => ({
+          instances: s.instances.filter((i) => i.id !== id),
+          selectedInstanceId: s.selectedInstanceId === id ? null : s.selectedInstanceId,
+        })),
 
-      selectedLoader: 'vanilla',
-      setSelectedLoader: (selectedLoader) => set({ selectedLoader }),
+      selectedInstanceId: null,
+      setSelectedInstanceId: (id) => set({ selectedInstanceId: id }),
+      selectedInstance: () => {
+        const { instances, selectedInstanceId } = get()
+        return instances.find((i) => i.id === selectedInstanceId) ?? null
+      },
 
       // Settings
       ram: 4096,
@@ -144,8 +161,7 @@ export const useStore = create<Store>()(
       name: 'yuyuframe-store',
       partialize: (s) => ({
         theme: s.theme,
-        selectedVersion: s.selectedVersion,
-        selectedLoader: s.selectedLoader,
+        selectedInstanceId: s.selectedInstanceId,
         ram: s.ram,
         javaPath: s.javaPath,
         minecraftPath: s.minecraftPath,

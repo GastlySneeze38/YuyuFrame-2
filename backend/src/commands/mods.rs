@@ -1,7 +1,6 @@
 use serde::Serialize;
-use std::path::PathBuf;
 
-use crate::minecraft::launcher::minecraft_dir;
+use crate::commands::instances::instance_mods_dir;
 
 #[derive(Serialize, Clone)]
 pub struct ModInfo {
@@ -10,27 +9,20 @@ pub struct ModInfo {
     pub enabled: bool,
 }
 
-fn mods_dir() -> PathBuf {
-    minecraft_dir().join("mods")
-}
-
 #[tauri::command]
-pub async fn mods_list() -> Result<Vec<ModInfo>, String> {
-    let dir = mods_dir();
+pub async fn mods_list(instance_id: String) -> Result<Vec<ModInfo>, String> {
+    let dir = instance_mods_dir(&instance_id);
     let mut mods = Vec::new();
 
     if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-
             let enabled = name.ends_with(".jar") && !name.ends_with(".jar.disabled");
             let disabled = name.ends_with(".jar.disabled");
-
             if !enabled && !disabled {
                 continue;
             }
-
             let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
             mods.push(ModInfo { name, size, enabled });
         }
@@ -41,8 +33,8 @@ pub async fn mods_list() -> Result<Vec<ModInfo>, String> {
 }
 
 #[tauri::command]
-pub async fn mods_toggle(name: String) -> Result<ModInfo, String> {
-    let dir = mods_dir();
+pub async fn mods_toggle(instance_id: String, name: String) -> Result<ModInfo, String> {
+    let dir = instance_mods_dir(&instance_id);
     let from = dir.join(&name);
 
     if !from.exists() {
@@ -65,8 +57,8 @@ pub async fn mods_toggle(name: String) -> Result<ModInfo, String> {
 }
 
 #[tauri::command]
-pub async fn mods_delete(name: String) -> Result<(), String> {
-    let dir = mods_dir();
+pub async fn mods_delete(instance_id: String, name: String) -> Result<(), String> {
+    let dir = instance_mods_dir(&instance_id);
     let path = dir.join(&name);
 
     if !path.exists() {
@@ -84,7 +76,11 @@ pub async fn mods_delete(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn mods_install(url: String, filename: String) -> Result<ModInfo, String> {
+pub async fn mods_install(
+    instance_id: String,
+    url: String,
+    filename: String,
+) -> Result<ModInfo, String> {
     if !url.starts_with("https://cdn.modrinth.com/") {
         return Err("URL non autorisée".into());
     }
@@ -98,7 +94,7 @@ pub async fn mods_install(url: String, filename: String) -> Result<ModInfo, Stri
         return Err("Seuls les fichiers .jar sont acceptés".into());
     }
 
-    let dir = mods_dir();
+    let dir = instance_mods_dir(&instance_id);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::builder()
@@ -119,7 +115,11 @@ pub async fn mods_install(url: String, filename: String) -> Result<ModInfo, Stri
 }
 
 #[tauri::command]
-pub async fn mods_upload(filename: String, data: Vec<u8>) -> Result<ModInfo, String> {
+pub async fn mods_upload(
+    instance_id: String,
+    filename: String,
+    data: Vec<u8>,
+) -> Result<ModInfo, String> {
     let safe_name = std::path::Path::new(&filename)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -129,7 +129,7 @@ pub async fn mods_upload(filename: String, data: Vec<u8>) -> Result<ModInfo, Str
         return Err("Seuls les fichiers .jar sont acceptés".into());
     }
 
-    let dir = mods_dir();
+    let dir = instance_mods_dir(&instance_id);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
 
     let dest = dir.join(&safe_name);

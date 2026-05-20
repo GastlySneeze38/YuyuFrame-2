@@ -84,7 +84,12 @@ type Tab = 'installed' | 'browse'
 
 export default function Mods() {
   const navigate = useNavigate()
-  const { selectedVersion, selectedLoader } = useStore()
+  const { selectedInstance } = useStore()
+  const instance = selectedInstance()
+  const instanceId = instance?.id ?? ''
+  const mcVersion = instance?.mc_version ?? ''
+  const loader = instance?.loader ?? 'vanilla'
+
   const [tab, setTab] = useState<Tab>('installed')
 
   // installed state
@@ -102,13 +107,32 @@ export default function Mods() {
   const [installing, setInstalling] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // ── No instance guard ──────────────────────────────────────────────────────
+
+  if (!instance) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4" style={{ background: '#09090D', color: 'white' }}>
+        <div style={{ fontSize: 36 }}>🧱</div>
+        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>Aucune instance sélectionnée</p>
+        <button
+          onClick={() => navigate('/instances')}
+          className="font-semibold transition-all duration-200 active:scale-95"
+          style={{ height: 38, padding: '0 20px', borderRadius: 10, fontSize: 13, background: '#4B3FCF', color: 'white' }}
+        >
+          Gérer les instances
+        </button>
+      </div>
+    )
+  }
+
   // ── Installed tab ──────────────────────────────────────────────────────────
 
   const loadMods = async () => {
+    if (!instanceId) return
     setLoadingMods(true)
     setModsError('')
     try {
-      setMods(await api.mods.list())
+      setMods(await api.mods.list(instanceId))
     } catch {
       setModsError('Impossible de charger les mods')
     } finally {
@@ -116,18 +140,18 @@ export default function Mods() {
     }
   }
 
-  useEffect(() => { loadMods() }, [])
+  useEffect(() => { loadMods() }, [instanceId])
 
   const handleToggle = async (mod: Mod) => {
     try {
-      const updated = await api.mods.toggle(mod.name)
+      const updated = await api.mods.toggle(instanceId, mod.name)
       setMods((prev) => prev.map((m) => m.name === mod.name ? updated : m))
     } catch { /* ignore */ }
   }
 
   const handleDelete = async (name: string) => {
     try {
-      await api.mods.delete(name)
+      await api.mods.delete(instanceId, name)
       setMods((prev) => prev.filter((m) => m.name !== name))
     } catch { /* ignore */ }
   }
@@ -137,7 +161,7 @@ export default function Mods() {
     if (!file) return
     setUploading(true)
     try {
-      const newMod = await api.mods.upload(file)
+      const newMod = await api.mods.upload(instanceId, file)
       setMods((prev) =>
         [...prev.filter((m) => m.name !== newMod.name), newMod]
           .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
@@ -156,7 +180,7 @@ export default function Mods() {
     setSearching(true)
     setSearchError('')
     try {
-      setResults(await fetchModrinthSearch(q, selectedVersion, selectedLoader))
+      setResults(await fetchModrinthSearch(q, mcVersion, loader))
     } catch {
       setSearchError('Impossible de joindre Modrinth')
     } finally {
@@ -164,7 +188,6 @@ export default function Mods() {
     }
   }
 
-  // Initial search on tab open
   useEffect(() => {
     if (tab === 'browse' && results.length === 0 && !searching) {
       runSearch(query)
@@ -184,13 +207,13 @@ export default function Mods() {
   const handleInstall = async (hit: ModrinthHit) => {
     setInstalling(hit.project_id)
     try {
-      const version = await fetchLatestVersion(hit.slug, selectedVersion, selectedLoader)
+      const version = await fetchLatestVersion(hit.slug, mcVersion, loader)
       if (!version) throw new Error('Aucune version compatible')
 
       const file = version.files.find((f) => f.primary) ?? version.files[0]
       if (!file) throw new Error('Aucun fichier disponible')
 
-      const newMod = await api.mods.install(file.url, file.filename)
+      const newMod = await api.mods.install(instanceId, file.url, file.filename)
       setMods((prev) =>
         [...prev.filter((m) => m.name !== newMod.name), newMod]
           .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
@@ -227,7 +250,7 @@ export default function Mods() {
         <div className="flex-1">
           <h1 className="font-black text-white" style={{ fontSize: 18, letterSpacing: '-0.01em' }}>Mods</h1>
           <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>
-            {selectedVersion} · {selectedLoader}
+            {instance.name} · {mcVersion} · {loader}
           </p>
         </div>
 
@@ -349,13 +372,10 @@ function BrowseTab({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      {/* Search bar */}
       <div className="relative">
-        <svg
-          viewBox="0 0 24 24" fill="currentColor" width={15} height={15}
+        <svg viewBox="0 0 24 24" fill="currentColor" width={15} height={15}
           className="absolute left-3 top-1/2 -translate-y-1/2"
-          style={{ color: 'rgba(255,255,255,0.3)', pointerEvents: 'none' }}
-        >
+          style={{ color: 'rgba(255,255,255,0.3)', pointerEvents: 'none' }}>
           <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
         </svg>
         <input
@@ -364,19 +384,13 @@ function BrowseTab({
           value={query}
           onChange={onQueryChange}
           className="w-full rounded-xl pl-9 pr-4 text-sm text-white outline-none"
-          style={{
-            height: 40,
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.08)',
-          }}
+          style={{ height: 40, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
           onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.6)' }}
           onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)' }}
         />
         {searching && (
-          <span
-            className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2"
-            style={{ borderColor: 'rgba(255,255,255,0.1)', borderTopColor: 'rgba(75,63,207,0.8)' }}
-          />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2"
+            style={{ borderColor: 'rgba(255,255,255,0.1)', borderTopColor: 'rgba(75,63,207,0.8)' }} />
         )}
       </div>
 
@@ -405,18 +419,14 @@ function BrowseTab({
   )
 }
 
-// ── Mod row (installed) ───────────────────────────────────────────────────────
+// ── Mod row ───────────────────────────────────────────────────────────────────
 
 function ModRow({ mod, onToggle, onDelete }: { mod: Mod; onToggle: () => void; onDelete: () => void }) {
   const [confirm, setConfirm] = useState(false)
   return (
     <div
       className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-150"
-      style={{
-        background: mod.enabled ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.018)',
-        border: '1px solid rgba(255,255,255,0.06)',
-        opacity: mod.enabled ? 1 : 0.6,
-      }}
+      style={{ background: mod.enabled ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.018)', border: '1px solid rgba(255,255,255,0.06)', opacity: mod.enabled ? 1 : 0.6 }}
     >
       <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: mod.enabled ? 'rgba(75,63,207,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <PlugIcon size={18} color={mod.enabled ? 'rgba(120,110,230,0.8)' : 'rgba(255,255,255,0.2)'} />
@@ -427,12 +437,9 @@ function ModRow({ mod, onToggle, onDelete }: { mod: Mod; onToggle: () => void; o
         </p>
         <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 1 }}>{formatSize(mod.size)}</p>
       </div>
-      <button
-        onClick={onToggle}
-        title={mod.enabled ? 'Désactiver' : 'Activer'}
+      <button onClick={onToggle} title={mod.enabled ? 'Désactiver' : 'Activer'}
         className="relative flex-shrink-0"
-        style={{ width: 40, height: 22, borderRadius: 11, background: mod.enabled ? '#4B3FCF' : 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer' }}
-      >
+        style={{ width: 40, height: 22, borderRadius: 11, background: mod.enabled ? '#4B3FCF' : 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer' }}>
         <span className="absolute transition-all duration-200" style={{ top: 3, left: mod.enabled ? 21 : 3, width: 16, height: 16, borderRadius: '50%', background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }} />
       </button>
       {confirm ? (
@@ -441,13 +448,11 @@ function ModRow({ mod, onToggle, onDelete }: { mod: Mod; onToggle: () => void; o
           <button onClick={() => setConfirm(false)} style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: '4px 10px' }}>Annuler</button>
         </div>
       ) : (
-        <button
-          onClick={() => setConfirm(true)}
+        <button onClick={() => setConfirm(true)}
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl transition-all duration-150"
           style={{ color: 'rgba(255,255,255,0.2)' }}
           onMouseEnter={(e) => { e.currentTarget.style.color = 'rgb(248,113,113)'; e.currentTarget.style.background = 'rgba(200,50,50,0.12)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.2)'; e.currentTarget.style.background = 'transparent' }}
-        >
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.2)'; e.currentTarget.style.background = 'transparent' }}>
           <svg viewBox="0 0 24 24" fill="currentColor" width={16} height={16}>
             <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
           </svg>
@@ -457,22 +462,13 @@ function ModRow({ mod, onToggle, onDelete }: { mod: Mod; onToggle: () => void; o
   )
 }
 
-// ── Modrinth card (browse) ────────────────────────────────────────────────────
+// ── Modrinth card ─────────────────────────────────────────────────────────────
 
-function ModrinthCard({
-  hit, installed, loading, onInstall,
-}: {
-  hit: ModrinthHit
-  installed: boolean
-  loading: boolean
-  onInstall: () => void
+function ModrinthCard({ hit, installed, loading, onInstall }: {
+  hit: ModrinthHit; installed: boolean; loading: boolean; onInstall: () => void
 }) {
   return (
-    <div
-      className="flex items-center gap-3 rounded-2xl px-4 py-3"
-      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
-    >
-      {/* Icon */}
+    <div className="flex items-center gap-3 rounded-2xl px-4 py-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
       <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, overflow: 'hidden', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {hit.icon_url ? (
           <img src={hit.icon_url} alt={hit.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -480,17 +476,11 @@ function ModrinthCard({
           <PlugIcon size={20} color="rgba(255,255,255,0.2)" />
         )}
       </div>
-
-      {/* Info */}
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-white" style={{ fontSize: 13 }}>{hit.title}</p>
         <p className="truncate" style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>{hit.description}</p>
-        <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', marginTop: 3 }}>
-          {formatDownloads(hit.downloads)} téléchargements
-        </p>
+        <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', marginTop: 3 }}>{formatDownloads(hit.downloads)} téléchargements</p>
       </div>
-
-      {/* Install button */}
       <button
         onClick={onInstall}
         disabled={installed || loading}
@@ -507,11 +497,7 @@ function ModrinthCard({
       >
         {loading ? (
           <span className="h-3 w-3 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.15)', borderTopColor: 'white' }} />
-        ) : installed ? (
-          '✓ Installé'
-        ) : (
-          'Installer'
-        )}
+        ) : installed ? '✓ Installé' : 'Installer'}
       </button>
     </div>
   )

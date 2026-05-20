@@ -26,15 +26,18 @@ fn set_progress(app: &tauri::AppHandle, current: u64, total: u64, message: &str)
 }
 
 /// `loader` — "vanilla" | "fabric" | "forge" (None treated as vanilla)
+/// `game_dir` — instance directory (saves, mods, configs); shared assets stay in minecraft_dir()
 pub async fn download_and_launch(
     version_id: &str,
     loader: Option<&str>,
     session: &MinecraftSession,
     ram_mb: u32,
+    game_dir: &std::path::Path,
     app: tauri::AppHandle,
     state: SharedState,
 ) -> Result<()> {
     let mc_dir = minecraft_dir();
+    tokio::fs::create_dir_all(game_dir).await?;
     let versions_dir = mc_dir.join("versions").join(version_id);
     let libraries_dir = mc_dir.join("libraries");
     let assets_dir = mc_dir.join("assets");
@@ -173,7 +176,7 @@ pub async fn download_and_launch(
 
     let (main_class, extra_classpath, extra_game_args, extra_jvm_args) =
         match loader.unwrap_or("vanilla") {
-            "fabric" => setup_fabric(version_id, &mc_dir, &libraries_dir, &app).await?,
+            "fabric" => setup_fabric(version_id, &libraries_dir, &game_dir.join("mods"), &app).await?,
             "forge" => setup_forge(version_id, &mc_dir, &libraries_dir, &java, &app).await?,
             _ => (details.main_class.clone(), vec![], vec![], vec![]),
         };
@@ -196,7 +199,7 @@ pub async fn download_and_launch(
     ];
     args.extend(extra_jvm_args);
     args.extend(["-cp".to_string(), classpath_str, main_class]);
-    args.extend(build_game_args(&details, session, &mc_dir, &assets_dir, version_id));
+    args.extend(build_game_args(&details, session, game_dir, &assets_dir, version_id));
     args.extend(extra_game_args);
 
     let mut child = tokio::process::Command::new(&java)
@@ -214,16 +217,15 @@ pub async fn download_and_launch(
 
 async fn setup_fabric(
     mc_version: &str,
-    mc_dir: &PathBuf,
     libraries_dir: &PathBuf,
+    mods_dir: &PathBuf,
     app: &tauri::AppHandle,
 ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>)> {
     set_progress(app, 72, 100, "Téléchargement Fabric Loader...");
 
     let profile = fabric::get_latest_profile(mc_version).await?;
 
-    let mods_dir = mc_dir.join("mods");
-    if let Err(e) = fabric::ensure_fabric_api(mc_version, &mods_dir).await {
+    if let Err(e) = fabric::ensure_fabric_api(mc_version, mods_dir).await {
         tracing::warn!("Fabric API auto-install échoué: {}", e);
     }
 
@@ -380,7 +382,7 @@ async fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> Result<()
 fn build_game_args(
     details: &VersionDetails,
     session: &MinecraftSession,
-    game_dir: &PathBuf,
+    game_dir: &std::path::Path,
     assets_dir: &PathBuf,
     version_id: &str,
 ) -> Vec<String> {

@@ -70,6 +70,10 @@ pub fn run() {
             commands::mods::mods_delete,
             commands::mods::mods_install,
             commands::mods::mods_upload,
+            commands::instances::instance_list,
+            commands::instances::instance_create,
+            commands::instances::instance_delete,
+            commands::instances::instance_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

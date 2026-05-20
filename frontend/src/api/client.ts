@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AuthStatus, DeviceAuthResponse, Mod, PollResponse, Version } from '@/types'
+import type { AuthStatus, DeviceAuthResponse, Instance, Mod, PollResponse, Version } from '@/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,15 @@ export const api = {
     list: () => invoke<Version[]>('list_versions'),
   },
 
+  instances: {
+    list: () => invoke<Instance[]>('instance_list'),
+    create: (name: string, mc_version: string, loader: string, ram_mb: number) =>
+      invoke<Instance>('instance_create', { name, mcVersion: mc_version, loader, ramMb: ram_mb }),
+    delete: (id: string) => invoke<void>('instance_delete', { id }),
+    update: (id: string, name: string, mc_version: string, loader: string, ram_mb: number) =>
+      invoke<Instance>('instance_update', { id, name, mcVersion: mc_version, loader, ramMb: ram_mb }),
+  },
+
   yuyu: {
     status: () => invoke<YuyuStatusResp>('yuyu_status'),
     register: (username: string, password: string) =>
@@ -49,20 +58,22 @@ export const api = {
   },
 
   launch: {
-    start: (version: string, ram?: number, loader?: string) =>
-      invoke<void>('launch_game', { version, ram, loader }),
+    start: (instanceId: string) =>
+      invoke<void>('launch_game', { instanceId }),
   },
 
   mods: {
-    list: () => invoke<Mod[]>('mods_list'),
-    toggle: (name: string) => invoke<Mod>('mods_toggle', { name }),
-    delete: (name: string) => invoke<void>('mods_delete', { name }),
-    install: (url: string, filename: string) =>
-      invoke<Mod>('mods_install', { url, filename }),
+    list: (instanceId: string) => invoke<Mod[]>('mods_list', { instanceId }),
+    toggle: (instanceId: string, name: string) =>
+      invoke<Mod>('mods_toggle', { instanceId, name }),
+    delete: (instanceId: string, name: string) =>
+      invoke<void>('mods_delete', { instanceId, name }),
+    install: (instanceId: string, url: string, filename: string) =>
+      invoke<Mod>('mods_install', { instanceId, url, filename }),
 
-    upload: async (file: File): Promise<Mod> => {
+    upload: async (instanceId: string, file: File): Promise<Mod> => {
       const data = Array.from(new Uint8Array(await file.arrayBuffer()))
-      return invoke<Mod>('mods_upload', { filename: file.name, data })
+      return invoke<Mod>('mods_upload', { instanceId, filename: file.name, data })
     },
   },
 }

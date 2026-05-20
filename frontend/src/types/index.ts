@@ -38,6 +38,14 @@ export interface Mod {
 
 export type Loader = 'vanilla' | 'fabric' | 'forge'
 
+export interface Instance {
+  id: string
+  name: string
+  mc_version: string
+  loader: Loader
+  ram_mb: number
+}
+
 export type Theme = 'chill' | 'gamer'
 
 export interface Account {
