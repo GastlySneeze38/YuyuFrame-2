@@ -27,11 +27,32 @@ module.exports = {
         'spin-slow': 'spin 2s linear infinite',
         'float': 'float 5s ease-in-out infinite',
         'float-slow': 'float 8s ease-in-out infinite',
+        'banner-flash': 'bannerFlash 0.9s ease-out forwards',
+        'banner-glow': 'bannerGlow 3s ease-in-out infinite',
+        'terrain-float': 'terrainFloat 5s ease-in-out infinite',
+        'star-pulse': 'starPulse 3s ease-in-out infinite',
       },
       keyframes: {
         float: {
           '0%, 100%': { transform: 'translateY(0px)' },
           '50%': { transform: 'translateY(-10px)' },
+        },
+        bannerFlash: {
+          '0%': { opacity: '0' },
+          '12%': { opacity: '1' },
+          '100%': { opacity: '0' },
+        },
+        bannerGlow: {
+          '0%, 100%': { opacity: '0.4' },
+          '50%': { opacity: '1' },
+        },
+        terrainFloat: {
+          '0%, 100%': { transform: 'translateY(0px)' },
+          '50%': { transform: 'translateY(-5px)' },
+        },
+        starPulse: {
+          '0%, 100%': { filter: 'brightness(1)' },
+          '50%': { filter: 'brightness(2.5)' },
         },
       },
     },

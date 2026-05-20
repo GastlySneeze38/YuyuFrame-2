@@ -12,8 +12,8 @@ interface DownloadProgress {
 }
 
 const STARS = Array.from({ length: 55 }, (_, i) => ({
-  x: (i * 37 + ((i * 7 + 13) % 100) * 1.7) % 100,
-  y: (i * 23 + ((i * 7 + 13) % 100) * 2.3) % 62,
+  x: 6 + ((i * 37 + ((i * 7 + 13) % 88) * 1.7) % 88),
+  y: 5 + ((i * 23 + ((i * 7 + 13) % 88) * 2.3) % 50),
   r: i % 4 === 0 ? 2 : 1,
   o: 0.15 + (i % 5) * 0.08,
 }))
@@ -39,6 +39,8 @@ export default function Home() {
   const [launchMsg, setLaunchMsg] = useState('')
   const [appVersion, setAppVersion] = useState('')
   const [modCounts, setModCounts] = useState<{ active: number; total: number } | null>(null)
+  const [bannerPulse, setBannerPulse] = useState(false)
+  const [bannerAnimating, setBannerAnimating] = useState(false)
 
   const instance = selectedInstance()
 
@@ -92,8 +94,14 @@ export default function Home() {
     navigate('/login', { replace: true })
   }
 
+  const handleBannerPlay = () => {
+    setBannerAnimating((v) => !v)
+  }
+
   const handleLaunch = async () => {
     if (!selectedInstanceId || gameRunning || !username) return
+    setBannerPulse(true)
+    setTimeout(() => setBannerPulse(false), 900)
     setLaunchMsg('')
     try {
       await api.launch.start(selectedInstanceId)
@@ -127,11 +135,30 @@ export default function Home() {
           <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at 38% 55%, rgba(75,63,207,0.09) 0%, transparent 55%)' }} />
           <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at 68% 58%, rgba(80,210,80,0.06) 0%, transparent 38%)' }} />
 
-          {STARS.map((s, i) => (
-            <div key={i} className="absolute rounded-full" style={{ left: `${s.x}%`, top: `${s.y}%`, width: s.r, height: s.r, background: `rgba(255,255,255,${s.o})` }} />
-          ))}
+          {/* Aurora — pulse infinie quand animating */}
+          {bannerAnimating && (
+            <div
+              className="absolute inset-0 pointer-events-none animate-banner-glow"
+              style={{ background: 'radial-gradient(ellipse at 38% 55%, rgba(75,63,207,0.28) 0%, transparent 62%)' }}
+            />
+          )}
 
-          <div className="absolute bottom-0 left-0 right-0" style={{ height: '38%' }}>
+          {/* Stars — scintillent en continu quand animating */}
+          <div className={bannerAnimating ? 'animate-star-pulse' : ''}>
+            {STARS.map((s, i) => (
+              <div key={i} className="absolute rounded-full" style={{ left: `${s.x}%`, top: `${s.y}%`, width: s.r, height: s.r, background: `rgba(255,255,255,${s.o})` }} />
+            ))}
+          </div>
+
+          {/* Flash violet au premier clic */}
+          {bannerPulse && (
+            <div
+              className="absolute inset-0 pointer-events-none animate-banner-flash rounded-[20px]"
+              style={{ background: 'radial-gradient(ellipse at 6% 6%, rgba(140,120,255,0.65) 0%, rgba(75,63,207,0.3) 35%, transparent 72%)', zIndex: 10 }}
+            />
+          )}
+
+          <div className={`absolute bottom-0 left-0 right-0 ${bannerAnimating ? 'animate-terrain-float' : ''}`} style={{ height: '38%' }}>
             <svg viewBox="0 0 800 220" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
               <path d="M0 220 L0 110 L16 110 L16 90 L32 90 L32 110 L48 110 L48 130 L64 130 L64 100 L80 100 L80 78 L96 78 L96 100 L112 100 L112 120 L128 120 L128 95 L144 95 L144 78 L160 78 L160 95 L176 95 L176 115 L192 115 L192 135 L208 135 L208 115 L224 115 L224 98 L240 98 L240 78 L256 78 L256 95 L272 95 L272 115 L288 115 L288 100 L304 100 L304 82 L320 82 L320 100 L336 100 L336 120 L352 120 L352 100 L368 100 L368 82 L384 82 L384 100 L400 100 L400 118 L416 118 L416 135 L432 135 L432 115 L448 115 L448 95 L464 95 L464 78 L480 78 L480 92 L496 92 L496 110 L512 110 L512 128 L528 128 L528 108 L544 108 L544 88 L560 88 L560 108 L576 108 L576 125 L592 125 L592 140 L608 140 L608 120 L624 120 L624 100 L640 100 L640 80 L656 80 L656 98 L672 98 L672 115 L688 115 L688 100 L704 100 L704 82 L720 82 L720 100 L736 100 L736 118 L752 118 L752 105 L768 105 L768 120 L784 120 L784 140 L800 140 L800 220 Z" fill="rgba(4,3,12,0.88)" />
             </svg>
@@ -139,28 +166,31 @@ export default function Home() {
 
           <div className="absolute bottom-0 left-0 right-0 h-24" style={{ background: 'linear-gradient(to top, rgba(9,9,13,0.95), transparent)' }} />
 
-          {/* Play capsule — top left */}
+          {/* Play capsule — top left (animation only) */}
           <button
-            onClick={username ? handleLaunch : () => navigate('/login')}
-            disabled={gameRunning || !selectedInstanceId}
+            onClick={handleBannerPlay}
             className="absolute left-4 top-4 flex items-center gap-2 transition-all duration-200"
             style={{
               height: 30, paddingLeft: 10, paddingRight: 14,
-              background: 'rgba(18,15,38,0.78)',
-              border: '1px solid rgba(255,255,255,0.22)',
+              background: bannerAnimating ? 'rgba(75,63,207,0.45)' : 'rgba(18,15,38,0.78)',
+              border: bannerAnimating ? '1px solid rgba(120,100,255,0.6)' : '1px solid rgba(255,255,255,0.22)',
               borderRadius: 20,
               backdropFilter: 'blur(10px)',
+              transition: 'background 0.3s, border-color 0.3s',
             }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.32)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.45)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(18,15,38,0.78)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)' }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = bannerAnimating ? 'rgba(75,63,207,0.45)' : 'rgba(18,15,38,0.78)'
+              e.currentTarget.style.borderColor = bannerAnimating ? 'rgba(120,100,255,0.6)' : 'rgba(255,255,255,0.22)'
+            }}
           >
-            {gameRunning ? (
-              <span className="h-3 w-3 animate-spin-slow rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'white' }} />
+            {bannerAnimating ? (
+              <svg viewBox="0 0 10 10" fill="white" width={9} height={9}><rect x="1" y="1" width="3" height="8" /><rect x="6" y="1" width="3" height="8" /></svg>
             ) : (
               <svg viewBox="0 0 10 10" fill="white" width={9} height={9}><polygon points="1,1 9,5 1,9" /></svg>
             )}
             <span className="text-xs font-medium text-white">
-              {gameRunning ? 'En jeu...' : 'Play'}
+              {bannerAnimating ? 'Stop' : 'Play'}
             </span>
           </button>
 
