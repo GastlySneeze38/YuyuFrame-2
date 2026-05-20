@@ -7,8 +7,6 @@ import Mods from '@/pages/Mods'
 import Settings from '@/pages/Settings'
 import YuyuLogin from '@/pages/YuyuLogin'
 import { useStore } from '@/stores/useStore'
-import { setApiToken } from '@/api/client'
-
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -24,13 +22,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { theme, brightness, yuyuToken } = useStore()
-
-  // Re-sync the API token on app mount (store is persisted but token is NOT,
-  // so this is always null after restart — forces /yuyu login)
-  useEffect(() => {
-    setApiToken(yuyuToken)
-  }, [yuyuToken])
+  const { theme, brightness } = useStore()
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)

@@ -1,56 +1,5 @@
-import type {
-  AuthStatus,
-  DeviceAuthResponse,
-  Mod,
-  PollResponse,
-  ProgressResponse,
-  Version,
-} from '@/types'
-
-const BASE = 'http://127.0.0.1:3847'
-
-// Module-level token — set after yuyu login, cleared on logout
-let _yuyuToken: string | null = null
-
-export function setApiToken(token: string | null) {
-  _yuyuToken = token
-}
-
-function authHeaders(withJson = false): Record<string, string> {
-  const h: Record<string, string> = {}
-  if (withJson) h['Content-Type'] = 'application/json'
-  if (_yuyuToken) h['X-Yuyu-Token'] = _yuyuToken
-  return h
-}
-
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() })
-  if (!res.ok) throw new Error(`GET ${path} échoué: ${res.status}`)
-  return res.json()
-}
-
-async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: authHeaders(!!body),
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  if (!res.ok) {
-    const msg = await res.text().catch(() => String(res.status))
-    throw new Error(msg || `POST ${path} échoué: ${res.status}`)
-  }
-  if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
-  return res.json()
-}
-
-async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'DELETE',
-    headers: authHeaders(),
-  })
-  if (!res.ok) throw new Error(`DELETE ${path} échoué: ${res.status}`)
-  return undefined as T
-}
+import { invoke } from '@tauri-apps/api/core'
+import type { AuthStatus, DeviceAuthResponse, Mod, PollResponse, Version } from '@/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,66 +22,47 @@ export interface McAccountInfo {
 // ── API ──────────────────────────────────────────────────────────────────────
 
 export const api = {
-  health: () => get<{ status: string }>('/api/health'),
-
   versions: {
-    list: () => get<Version[]>('/api/versions'),
+    list: () => invoke<Version[]>('list_versions'),
   },
 
   yuyu: {
-    status: () => get<YuyuStatusResp>('/api/yuyu/status'),
+    status: () => invoke<YuyuStatusResp>('yuyu_status'),
     register: (username: string, password: string) =>
-      post<YuyuLoginResp>('/api/yuyu/register', { username, password }),
+      invoke<YuyuLoginResp>('yuyu_register', { username, password }),
     login: (username: string, password: string) =>
-      post<YuyuLoginResp>('/api/yuyu/login', { username, password }),
-    logout: () => post<void>('/api/yuyu/logout'),
+      invoke<YuyuLoginResp>('yuyu_login', { username, password }),
+    logout: () => invoke<void>('yuyu_logout'),
   },
 
   auth: {
-    status: () => get<AuthStatus>('/api/auth/status'),
-    startDevice: () => post<DeviceAuthResponse>('/api/auth/device'),
-    poll: () => get<PollResponse>('/api/auth/poll'),
-    logout: () => post<void>('/api/auth/logout'),
+    status: () => invoke<AuthStatus>('auth_status'),
+    startDevice: () => invoke<DeviceAuthResponse>('auth_start_device'),
+    poll: () => invoke<PollResponse>('auth_poll'),
+    logout: () => invoke<void>('auth_logout'),
   },
 
   mc: {
-    accounts: () => get<McAccountInfo[]>('/api/mc/accounts'),
-    switch: (uuid: string) => post<McAccountInfo>('/api/mc/switch', { uuid }),
-    delete: (uuid: string) => del<void>(`/api/mc/account/${uuid}`),
+    accounts: () => invoke<McAccountInfo[]>('mc_list_accounts'),
+    switch: (uuid: string) => invoke<McAccountInfo>('mc_switch', { uuid }),
+    delete: (uuid: string) => invoke<void>('mc_delete', { uuid }),
   },
 
   launch: {
     start: (version: string, ram?: number, loader?: string) =>
-      post<{ success: boolean; message: string }>('/api/launch', { version, ram, loader }),
-    progress: () => get<ProgressResponse>('/api/launch/progress'),
+      invoke<void>('launch_game', { version, ram, loader }),
   },
 
   mods: {
-    list: () => get<Mod[]>('/api/mods'),
-    toggle: async (name: string): Promise<Mod> => {
-      const res = await fetch(`${BASE}/api/mods/${encodeURIComponent(name)}/toggle`, {
-        method: 'PUT',
-        headers: authHeaders(),
-      })
-      return res.json()
-    },
-    delete: (name: string) => del<void>(`/api/mods/${encodeURIComponent(name)}`),
+    list: () => invoke<Mod[]>('mods_list'),
+    toggle: (name: string) => invoke<Mod>('mods_toggle', { name }),
+    delete: (name: string) => invoke<void>('mods_delete', { name }),
     install: (url: string, filename: string) =>
-      post<Mod>('/api/mods/install', { url, filename }),
+      invoke<Mod>('mods_install', { url, filename }),
 
     upload: async (file: File): Promise<Mod> => {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch(`${BASE}/api/mods/upload`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: form,
-      })
-      if (!res.ok) {
-        const msg = await res.text().catch(() => String(res.status))
-        throw new Error(msg)
-      }
-      return res.json()
+      const data = Array.from(new Uint8Array(await file.arrayBuffer()))
+      return invoke<Mod>('mods_upload', { filename: file.name, data })
     },
   },
 }

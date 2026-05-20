@@ -1,19 +1,23 @@
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useStore } from '@/stores/useStore'
+
+const win = getCurrentWindow()
 
 export function TitleBar() {
   const { theme, toggleTheme, username } = useStore()
 
-  const minimize = () => window.api?.minimize()
-  const maximize = () => window.api?.maximize()
-  const close = () => window.api?.close()
+  const minimize = () => win.minimize()
+  const maximize = () => win.toggleMaximize()
+  const close = () => win.close()
 
   return (
     <div
-      className="drag-region flex h-9 flex-shrink-0 items-center justify-between px-4"
+      data-tauri-drag-region
+      className="flex h-9 flex-shrink-0 items-center justify-between px-4"
       style={{ background: '#09090D', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
     >
       {/* Logo */}
-      <div className="no-drag flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <div className="h-3.5 w-3.5 rounded-sm" style={{ background: '#4B3FCF' }} />
         <span className="text-xs font-bold tracking-widest" style={{ color: 'rgba(255,255,255,0.5)', letterSpacing: '0.2em' }}>
           YUYUFRAME
@@ -21,7 +25,7 @@ export function TitleBar() {
       </div>
 
       {/* Center: user info + theme toggle */}
-      <div className="no-drag flex items-center gap-3">
+      <div className="flex items-center gap-3">
         {username && (
           <span className="text-xs" style={{ color: 'rgba(255,255,255,0.28)' }}>
             {username}
@@ -39,8 +43,8 @@ export function TitleBar() {
       </div>
 
       {/* Window controls */}
-      <div className="no-drag flex items-center gap-0.5">
-        {/* Minimize — subtle red */}
+      <div className="flex items-center gap-0.5">
+        {/* Minimize */}
         <button
           onClick={minimize}
           className="flex h-7 w-7 items-center justify-center rounded transition-all duration-150"
@@ -76,7 +80,7 @@ export function TitleBar() {
             <rect x="0.5" y="0.5" width="8" height="8" />
           </svg>
         </button>
-        {/* Close — vivid red */}
+        {/* Close */}
         <button
           onClick={close}
           className="flex h-7 w-7 items-center justify-center rounded transition-all duration-150"

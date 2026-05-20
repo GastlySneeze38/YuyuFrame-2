@@ -1,9 +1,10 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
+use std::path::Path;
 
-pub fn init_db() -> Result<Connection> {
-    let conn = Connection::open("yuyu.db")?;
-    tracing::info!("Base de données : yuyu.db ({})", std::env::current_dir().unwrap_or_default().display());
+pub fn init_db(path: &Path) -> Result<Connection> {
+    let conn = Connection::open(path)?;
+    tracing::info!("Base de données : {}", path.display());
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;

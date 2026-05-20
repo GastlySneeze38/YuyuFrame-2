@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { listen } from '@tauri-apps/api/event'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
-import type { ProgressResponse } from '@/types'
+
+interface DownloadProgress {
+  current: number
+  total: number
+  message: string
+}
 
 const STARS = Array.from({ length: 55 }, (_, i) => ({
   x: (i * 37 + ((i * 7 + 13) % 100) * 1.7) % 100,
@@ -23,9 +29,8 @@ export default function Home() {
     gameRunning, setGameRunning,
   } = useStore()
 
-  const [progress, setProgress] = useState<ProgressResponse | null>(null)
+  const [progress, setProgress] = useState<DownloadProgress | null>(null)
   const [launchMsg, setLaunchMsg] = useState('')
-  const progressRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     api.versions.list().then((v) => {
@@ -37,23 +42,33 @@ export default function Home() {
     }).catch(() => {})
   }, [])
 
+  // Listen to Tauri events for download progress and game state
   useEffect(() => {
-    if (gameRunning) {
-      progressRef.current = setInterval(async () => {
-        try {
-          const p = await api.launch.progress()
-          setProgress(p)
-          if (!p.downloading && !p.message.includes('cours')) {
-            setGameRunning(false)
-            setProgress(null)
-          }
-        } catch { /* ignore */ }
-      }, 1000)
-    } else {
-      if (progressRef.current) { clearInterval(progressRef.current); progressRef.current = null }
+    let unlistenProgress: (() => void) | null = null
+    let unlistenState: (() => void) | null = null
+    let unlistenError: (() => void) | null = null
+
+    listen<DownloadProgress>('download_progress', (event) => {
+      setProgress(event.payload)
+    }).then((fn) => { unlistenProgress = fn })
+
+    listen<{ running: boolean }>('game_state', (event) => {
+      setGameRunning(event.payload.running)
+      if (!event.payload.running) setProgress(null)
+    }).then((fn) => { unlistenState = fn })
+
+    listen<string>('launch_error', (event) => {
+      setLaunchMsg(event.payload)
+      setGameRunning(false)
+      setProgress(null)
+    }).then((fn) => { unlistenError = fn })
+
+    return () => {
+      unlistenProgress?.()
+      unlistenState?.()
+      unlistenError?.()
     }
-    return () => { if (progressRef.current) clearInterval(progressRef.current) }
-  }, [gameRunning])
+  }, [])
 
   const handleLogout = async () => {
     await api.auth.logout()
@@ -65,15 +80,17 @@ export default function Home() {
     if (!selectedVersion || gameRunning || !username) return
     setLaunchMsg('')
     try {
-      const resp = await api.launch.start(selectedVersion, ram, selectedLoader)
-      if (resp.success) setGameRunning(true)
-      else setLaunchMsg(resp.message)
+      await api.launch.start(selectedVersion, ram, selectedLoader)
+      setGameRunning(true)
     } catch (e) {
       setLaunchMsg(e instanceof Error ? e.message : 'Erreur de lancement')
     }
   }
 
   const filteredVersions = versions.filter((v) => v.version_type === 'release')
+  const percent = progress && progress.total > 0
+    ? Math.round(progress.current / progress.total * 100)
+    : 0
 
   return (
     <div className="flex h-full flex-col overflow-hidden" style={{ background: '#09090D' }}>
@@ -380,16 +397,16 @@ export default function Home() {
           )}
 
           {/* Progress */}
-          {progress && progress.downloading && (
+          {progress && (
             <div className="w-full flex flex-col gap-1.5">
               <div className="flex justify-between" style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
                 <span className="truncate">{progress.message}</span>
-                <span className="ml-2 flex-shrink-0">{Math.round(progress.percent)}%</span>
+                <span className="ml-2 flex-shrink-0">{percent}%</span>
               </div>
               <div className="h-1 w-full overflow-hidden rounded-full" style={{ background: 'rgba(0,0,0,0.4)' }}>
                 <div
                   className="h-full rounded-full transition-all duration-300"
-                  style={{ width: `${progress.percent}%`, background: '#4B3FCF' }}
+                  style={{ width: `${percent}%`, background: '#4B3FCF' }}
                 />
               </div>
             </div>
@@ -442,17 +459,14 @@ export default function Home() {
           className="flex flex-col"
           style={{ width: '28%', borderLeft: '1px solid rgba(255,255,255,0.05)' }}
         >
-          {/* Titre */}
           <div className="flex items-center gap-4 px-6 pt-6">
             <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
             <span className="font-bold text-white tracking-widest uppercase" style={{ fontSize: 13 }}>Navigation</span>
             <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
           </div>
 
-          {/* Zone centrale libre */}
           <div className="flex-1" />
 
-          {/* Icônes utilitaires */}
           <div className="flex items-center justify-center gap-3 pb-2">
             <FIcon title="Infos">
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
@@ -476,10 +490,8 @@ export default function Home() {
             </FIcon>
           </div>
 
-          {/* Séparateur */}
           <div className="mx-6 h-px" style={{ background: 'rgba(255,255,255,0.05)' }} />
 
-          {/* Icônes de navigation */}
           <div className="flex items-center justify-center gap-2 px-4 pb-5 pt-2">
             <NIcon title="Login" active={!!username} label="Login" onClick={() => navigate('/login')}>
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">

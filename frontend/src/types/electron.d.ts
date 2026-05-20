@@ -1,8 +1,1 @@
-interface Window {
-  api?: {
-    openExternal: (url: string) => Promise<void>
-    minimize: () => void
-    maximize: () => void
-    close: () => void
-  }
-}
+// Window controls are now handled by Tauri (@tauri-apps/api/window)

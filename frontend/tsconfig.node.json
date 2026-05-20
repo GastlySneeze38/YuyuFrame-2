@@ -6,8 +6,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true,
-    "types": ["electron-vite/node"]
+    "noEmit": true
   },
-  "include": ["electron.vite.config.*", "electron/**/*"]
+  "include": ["vite.config.*"]
 }

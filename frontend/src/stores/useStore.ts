@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { setApiToken } from '@/api/client'
 import type { Loader, Theme, Version, Account } from '@/types'
 
 interface Store {
@@ -63,11 +62,9 @@ export const useStore = create<Store>()(
       yuyuToken: null,
       yuyuUsername: null,
       setYuyuSession: (token, username) => {
-        setApiToken(token)
         set({ yuyuToken: token, yuyuUsername: username })
       },
       clearYuyuSession: () => {
-        setApiToken(null)
         set({ yuyuToken: null, yuyuUsername: null, accounts: [], username: null, uuid: null })
       },
 
@@ -145,7 +142,6 @@ export const useStore = create<Store>()(
     }),
     {
       name: 'yuyuframe-store',
-      // yuyuToken intentionally excluded — must re-authenticate each app start
       partialize: (s) => ({
         theme: s.theme,
         selectedVersion: s.selectedVersion,
@@ -154,7 +150,6 @@ export const useStore = create<Store>()(
         javaPath: s.javaPath,
         minecraftPath: s.minecraftPath,
         brightness: s.brightness,
-        // username/uuid persisted only for display (avatar pre-load, etc.)
         username: s.username,
         uuid: s.uuid,
       }),
