@@ -31,15 +31,6 @@ export function TitleBar() {
             {username}
           </span>
         )}
-        <button
-          onClick={toggleTheme}
-          className="rounded px-1.5 py-0.5 text-xs transition-all duration-150"
-          style={{ color: 'rgba(255,255,255,0.2)' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.2)' }}
-        >
-          {theme === 'chill' ? '❄️' : '🎮'}
-        </button>
       </div>
 
       {/* Window controls */}

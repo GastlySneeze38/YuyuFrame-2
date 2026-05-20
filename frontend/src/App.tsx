@@ -6,6 +6,7 @@ import Home from '@/pages/Home'
 import Instances from '@/pages/Instances'
 import Mods from '@/pages/Mods'
 import Settings from '@/pages/Settings'
+import Information from '@/pages/Information'
 import YuyuLogin from '@/pages/YuyuLogin'
 import { useStore } from '@/stores/useStore'
 function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -49,6 +50,7 @@ export default function App() {
                   <Route path="/instances" element={<Instances />} />
                   <Route path="/mods" element={<Mods />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/information" element={<Information />} />
                 </Routes>
               </AuthGuard>
             }
