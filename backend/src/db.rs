@@ -7,8 +7,7 @@ pub fn init_db(path: &Path) -> Result<Connection> {
     tracing::info!("Base de données : {}", path.display());
 
     conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA foreign_keys = ON;
+        "PRAGMA foreign_keys = ON;
 
          CREATE TABLE IF NOT EXISTS yuyu_users (
              id            INTEGER PRIMARY KEY AUTOINCREMENT,
