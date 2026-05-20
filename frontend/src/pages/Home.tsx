@@ -12,8 +12,8 @@ interface DownloadProgress {
 }
 
 const STARS = Array.from({ length: 55 }, (_, i) => ({
-  x: 6 + ((i * 37 + ((i * 7 + 13) % 88) * 1.7) % 88),
-  y: 5 + ((i * 23 + ((i * 7 + 13) % 88) * 2.3) % 50),
+  x: (i * 37 + ((i * 7 + 13) % 100) * 1.7) % 100,
+  y: (i * 23 + ((i * 7 + 13) % 100) * 2.3) % 62,
   r: i % 4 === 0 ? 2 : 1,
   o: 0.15 + (i % 5) * 0.08,
 }))
@@ -139,22 +139,22 @@ export default function Home() {
           {bannerAnimating && (
             <div
               className="absolute inset-0 pointer-events-none animate-banner-glow"
-              style={{ background: 'radial-gradient(ellipse at 38% 55%, rgba(75,63,207,0.28) 0%, transparent 62%)' }}
+              style={{ background: 'radial-gradient(ellipse at 38% 60%, rgba(90,70,255,0.7) 0%, rgba(75,63,207,0.35) 40%, transparent 70%)' }}
             />
           )}
 
           {/* Stars — scintillent en continu quand animating */}
-          <div className={bannerAnimating ? 'animate-star-pulse' : ''}>
+          <div className={`absolute inset-0 ${bannerAnimating ? 'animate-star-pulse' : ''}`}>
             {STARS.map((s, i) => (
               <div key={i} className="absolute rounded-full" style={{ left: `${s.x}%`, top: `${s.y}%`, width: s.r, height: s.r, background: `rgba(255,255,255,${s.o})` }} />
             ))}
           </div>
 
-          {/* Flash violet au premier clic */}
+          {/* Flash violet au lancement */}
           {bannerPulse && (
             <div
               className="absolute inset-0 pointer-events-none animate-banner-flash rounded-[20px]"
-              style={{ background: 'radial-gradient(ellipse at 6% 6%, rgba(140,120,255,0.65) 0%, rgba(75,63,207,0.3) 35%, transparent 72%)', zIndex: 10 }}
+              style={{ background: 'radial-gradient(ellipse at 50% 50%, rgba(160,130,255,0.95) 0%, rgba(90,70,255,0.6) 35%, transparent 72%)', zIndex: 10 }}
             />
           )}
 
