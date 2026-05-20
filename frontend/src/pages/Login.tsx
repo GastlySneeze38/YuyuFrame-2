@@ -278,18 +278,6 @@ function AccountCard({
         boxShadow: isActive ? '0 0 32px rgba(75,63,207,0.14)' : 'none',
       }}
     >
-      <button
-        onClick={onRemove}
-        className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-lg transition-all duration-150"
-        style={{ color: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.04)' }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(252,165,165,0.85)'; e.currentTarget.style.background = 'rgba(200,50,50,0.14)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.18)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 11, height: 11 }}>
-          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-        </svg>
-      </button>
-
       <div className="relative mt-2">
         <img
           src={`https://mc-heads.net/avatar/${acc.uuid}/80`}
@@ -323,27 +311,38 @@ function AccountCard({
         </p>
       </div>
 
-      {isActive ? (
+      <div className="flex w-full flex-col gap-1.5">
+        {isActive ? (
+          <button
+            onClick={onSelect}
+            className="w-full rounded-xl py-2 text-sm font-medium text-white transition-all duration-150"
+            style={{ background: 'rgba(75,63,207,0.25)', border: '1px solid rgba(75,63,207,0.45)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.42)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.25)' }}
+          >
+            Jouer →
+          </button>
+        ) : (
+          <button
+            onClick={onSelect}
+            className="w-full rounded-xl py-2 text-sm transition-all duration-150"
+            style={{ color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.08)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.45)'; e.currentTarget.style.color = 'rgba(255,255,255,0.9)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'rgba(255,255,255,0.45)' }}
+          >
+            Sélectionner
+          </button>
+        )}
         <button
-          onClick={onSelect}
-          className="w-full rounded-xl py-2 text-sm font-medium text-white transition-all duration-150"
-          style={{ background: 'rgba(75,63,207,0.25)', border: '1px solid rgba(75,63,207,0.45)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.42)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.25)' }}
-        >
-          Jouer →
-        </button>
-      ) : (
-        <button
-          onClick={onSelect}
+          onClick={onRemove}
           className="w-full rounded-xl py-2 text-sm transition-all duration-150"
-          style={{ color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.08)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.45)'; e.currentTarget.style.color = 'rgba(255,255,255,0.9)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'rgba(255,255,255,0.45)' }}
+          style={{ color: 'rgba(255,255,255,0.25)', border: '1px solid rgba(255,255,255,0.05)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'rgb(252,165,165)'; e.currentTarget.style.borderColor = 'rgba(200,50,50,0.3)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.25)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' }}
         >
-          Sélectionner
+          Déconnecter
         </button>
-      )}
+      </div>
     </div>
   )
 }
