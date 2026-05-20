@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::db;
 use crate::minecraft::launcher::minecraft_dir;
+use crate::state::SharedState;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Instance {
@@ -19,38 +21,12 @@ fn yuyu_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn instances_file() -> PathBuf {
-    yuyu_dir().join("instances.json")
-}
-
 pub fn instance_dir(id: &str) -> PathBuf {
     yuyu_dir().join("instances").join(id)
 }
 
 pub fn instance_mods_dir(id: &str) -> PathBuf {
     instance_dir(id).join("mods")
-}
-
-pub fn load_instances_pub() -> Vec<Instance> {
-    load_instances()
-}
-
-fn load_instances() -> Vec<Instance> {
-    let path = instances_file();
-    let Ok(data) = std::fs::read_to_string(&path) else {
-        return vec![];
-    };
-    serde_json::from_str(&data).unwrap_or_default()
-}
-
-fn save_instances(instances: &[Instance]) -> Result<(), String> {
-    let path = instances_file();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let json = serde_json::to_string_pretty(instances).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 fn gen_id() -> String {
@@ -63,13 +39,22 @@ fn gen_id() -> String {
         .to_lowercase()
 }
 
+fn row_to_instance(r: db::InstanceRow) -> Instance {
+    Instance { id: r.id, name: r.name, mc_version: r.mc_version, loader: r.loader, ram_mb: r.ram_mb }
+}
+
 #[tauri::command]
-pub async fn instance_list() -> Result<Vec<Instance>, String> {
-    Ok(load_instances())
+pub async fn instance_list(state: tauri::State<'_, SharedState>) -> Result<Vec<Instance>, String> {
+    let s = state.read().await;
+    let db = s.db.lock().await;
+    db::instance_list(&db)
+        .map(|rows| rows.into_iter().map(row_to_instance).collect())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn instance_create(
+    state: tauri::State<'_, SharedState>,
     name: String,
     mc_version: String,
     loader: String,
@@ -78,49 +63,51 @@ pub async fn instance_create(
     if name.trim().is_empty() {
         return Err("Le nom de l'instance est requis".into());
     }
-    let mut instances = load_instances();
     let id = gen_id();
     tokio::fs::create_dir_all(instance_mods_dir(&id))
         .await
         .map_err(|e| e.to_string())?;
-    let instance = Instance { id, name: name.trim().to_string(), mc_version, loader, ram_mb };
-    instances.push(instance.clone());
-    save_instances(&instances)?;
-    Ok(instance)
+    let name = name.trim().to_string();
+    let s = state.read().await;
+    let db = s.db.lock().await;
+    db::instance_insert(&db, &id, &name, &mc_version, &loader, ram_mb)
+        .map_err(|e| e.to_string())?;
+    Ok(Instance { id, name, mc_version, loader, ram_mb })
 }
 
 #[tauri::command]
-pub async fn instance_delete(id: String) -> Result<(), String> {
-    let mut instances = load_instances();
-    instances.retain(|i| i.id != id);
-    save_instances(&instances)?;
+pub async fn instance_delete(
+    state: tauri::State<'_, SharedState>,
+    id: String,
+) -> Result<(), String> {
+    {
+        let s = state.read().await;
+        let db = s.db.lock().await;
+        db::instance_delete(&db, &id).map_err(|e| e.to_string())?;
+    }
     let dir = instance_dir(&id);
     if dir.exists() {
-        tokio::fs::remove_dir_all(&dir)
-            .await
-            .map_err(|e| e.to_string())?;
+        tokio::fs::remove_dir_all(&dir).await.map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_update(
+    state: tauri::State<'_, SharedState>,
     id: String,
     name: String,
     mc_version: String,
     loader: String,
     ram_mb: u32,
 ) -> Result<Instance, String> {
-    let mut instances = load_instances();
-    let inst = instances
-        .iter_mut()
-        .find(|i| i.id == id)
+    let name = name.trim().to_string();
+    let s = state.read().await;
+    let db = s.db.lock().await;
+    db::instance_update(&db, &id, &name, &mc_version, &loader, ram_mb)
+        .map_err(|e| e.to_string())?;
+    let row = db::instance_get(&db, &id)
+        .map_err(|e| e.to_string())?
         .ok_or("Instance introuvable")?;
-    inst.name = name.trim().to_string();
-    inst.mc_version = mc_version;
-    inst.loader = loader;
-    inst.ram_mb = ram_mb;
-    let updated = inst.clone();
-    save_instances(&instances)?;
-    Ok(updated)
+    Ok(row_to_instance(row))
 }

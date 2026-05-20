@@ -1,6 +1,7 @@
 use tauri::Emitter;
 
-use crate::commands::instances::{instance_dir, load_instances_pub};
+use crate::commands::instances::instance_dir;
+use crate::db;
 use crate::minecraft::launcher;
 use crate::state::SharedState;
 
@@ -19,11 +20,20 @@ pub async fn launch_game(
         return Err("Le jeu est déjà en cours".into());
     }
 
-    let instances = load_instances_pub();
-    let instance = instances
-        .into_iter()
-        .find(|i| i.id == instance_id)
-        .ok_or("Instance introuvable")?;
+    let instance = {
+        let s = state.read().await;
+        let db = s.db.lock().await;
+        db::instance_get(&db, &instance_id)
+            .map_err(|e| e.to_string())?
+            .ok_or("Instance introuvable")?
+    };
+    let instance = crate::commands::instances::Instance {
+        id: instance.id,
+        name: instance.name,
+        mc_version: instance.mc_version,
+        loader: instance.loader,
+        ram_mb: instance.ram_mb,
+    };
 
     let game_dir = instance_dir(&instance_id);
     tokio::fs::create_dir_all(&game_dir).await.map_err(|e| e.to_string())?;

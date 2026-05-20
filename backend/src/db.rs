@@ -37,6 +37,15 @@ pub fn init_db(path: &Path) -> Result<Connection> {
              user_id    INTEGER PRIMARY KEY REFERENCES yuyu_users(id) ON DELETE CASCADE,
              token      TEXT    NOT NULL,
              created_at INTEGER NOT NULL
+         );
+
+         CREATE TABLE IF NOT EXISTS instances (
+             id         TEXT    PRIMARY KEY,
+             name       TEXT    NOT NULL,
+             mc_version TEXT    NOT NULL,
+             loader     TEXT    NOT NULL,
+             ram_mb     INTEGER NOT NULL DEFAULT 4096,
+             created_at INTEGER NOT NULL
          );",
     )?;
 
@@ -258,5 +267,91 @@ pub fn load_yuyu_token(conn: &Connection) -> Result<Option<YuyuTokenRow>> {
 
 pub fn delete_yuyu_token(conn: &Connection, user_id: i64) -> Result<()> {
     conn.execute("DELETE FROM yuyu_tokens WHERE user_id = ?1", params![user_id])?;
+    Ok(())
+}
+
+// ── Instances ──────────────────────────────────────────────────────────────────
+
+pub struct InstanceRow {
+    pub id: String,
+    pub name: String,
+    pub mc_version: String,
+    pub loader: String,
+    pub ram_mb: u32,
+}
+
+pub fn instance_list(conn: &Connection) -> Result<Vec<InstanceRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, mc_version, loader, ram_mb FROM instances ORDER BY created_at ASC",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(InstanceRow {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                mc_version: r.get(2)?,
+                loader: r.get(3)?,
+                ram_mb: r.get::<_, u32>(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub fn instance_get(conn: &Connection, id: &str) -> Result<Option<InstanceRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, mc_version, loader, ram_mb FROM instances WHERE id = ?1",
+    )?;
+    match stmt.query_row(params![id], |r| {
+        Ok(InstanceRow {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            mc_version: r.get(2)?,
+            loader: r.get(3)?,
+            ram_mb: r.get::<_, u32>(4)?,
+        })
+    }) {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn instance_insert(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    mc_version: &str,
+    loader: &str,
+    ram_mb: u32,
+) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO instances (id, name, mc_version, loader, ram_mb, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, name, mc_version, loader, ram_mb, now],
+    )?;
+    Ok(())
+}
+
+pub fn instance_update(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    mc_version: &str,
+    loader: &str,
+    ram_mb: u32,
+) -> Result<()> {
+    let n = conn.execute(
+        "UPDATE instances SET name=?1, mc_version=?2, loader=?3, ram_mb=?4 WHERE id=?5",
+        params![name, mc_version, loader, ram_mb, id],
+    )?;
+    if n == 0 {
+        return Err(anyhow::anyhow!("Instance introuvable"));
+    }
+    Ok(())
+}
+
+pub fn instance_delete(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM instances WHERE id = ?1", params![id])?;
     Ok(())
 }
