@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { open } from '@tauri-apps/plugin-shell'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
 import type { Account } from '@/types'
@@ -39,7 +40,7 @@ export default function Login() {
       const resp = await api.auth.startDevice()
       setUserCode(resp.user_code)
       setVerifyUrl(resp.verification_uri)
-      window.api?.openExternal(resp.verification_uri)
+      open(resp.verification_uri)
       setStep('polling')
       pollRef.current = setInterval(async () => {
         try {
@@ -195,7 +196,7 @@ export default function Login() {
                 </button>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => window.api?.openExternal(verifyUrl)}
+                    onClick={() => open(verifyUrl)}
                     className="flex-1 rounded-xl py-2.5 text-sm font-medium text-white transition-all duration-150"
                     style={{ background: 'rgba(75,63,207,0.15)', border: '1px solid rgba(75,63,207,0.3)' }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.3)' }}
