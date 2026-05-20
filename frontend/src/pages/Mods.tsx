@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
-import type { Mod } from '@/types'
+import type { Instance, Mod } from '@/types'
 
 // ── Modrinth types ────────────────────────────────────────────────────────────
 
@@ -78,54 +78,28 @@ async function fetchLatestVersion(
   return versions[0] ?? null
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
 type Tab = 'installed' | 'browse'
 
-export default function Mods() {
-  const navigate = useNavigate()
-  const { selectedInstance } = useStore()
-  const instance = selectedInstance()
-  const instanceId = instance?.id ?? ''
-  const mcVersion = instance?.mc_version ?? ''
-  const loader = instance?.loader ?? 'vanilla'
+// ── ModsContent — embeddable in any page ──────────────────────────────────────
+
+export function ModsContent({ instance }: { instance: Instance }) {
+  const instanceId = instance.id
+  const mcVersion = instance.mc_version
+  const loader = instance.loader
 
   const [tab, setTab] = useState<Tab>('installed')
-
-  // installed state
   const [mods, setMods] = useState<Mod[]>([])
   const [loadingMods, setLoadingMods] = useState(true)
   const [modsError, setModsError] = useState('')
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // browse state
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ModrinthHit[]>([])
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [installing, setInstalling] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // ── No instance guard ──────────────────────────────────────────────────────
-
-  if (!instance) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-4" style={{ background: '#09090D', color: 'white' }}>
-        <div style={{ fontSize: 36 }}>🧱</div>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>Aucune instance sélectionnée</p>
-        <button
-          onClick={() => navigate('/instances')}
-          className="font-semibold transition-all duration-200 active:scale-95"
-          style={{ height: 38, padding: '0 20px', borderRadius: 10, fontSize: 13, background: '#4B3FCF', color: 'white' }}
-        >
-          Gérer les instances
-        </button>
-      </div>
-    )
-  }
-
-  // ── Installed tab ──────────────────────────────────────────────────────────
 
   const loadMods = async () => {
     if (!instanceId) return
@@ -141,6 +115,12 @@ export default function Mods() {
   }
 
   useEffect(() => { loadMods() }, [instanceId])
+
+  useEffect(() => {
+    if (tab === 'browse' && results.length === 0 && !searching) {
+      runSearch(query)
+    }
+  }, [tab])
 
   const handleToggle = async (mod: Mod) => {
     try {
@@ -174,8 +154,6 @@ export default function Mods() {
     }
   }
 
-  // ── Browse tab ─────────────────────────────────────────────────────────────
-
   const runSearch = async (q: string) => {
     setSearching(true)
     setSearchError('')
@@ -187,12 +165,6 @@ export default function Mods() {
       setSearching(false)
     }
   }
-
-  useEffect(() => {
-    if (tab === 'browse' && results.length === 0 && !searching) {
-      runSearch(query)
-    }
-  }, [tab])
 
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const q = e.target.value
@@ -209,10 +181,8 @@ export default function Mods() {
     try {
       const version = await fetchLatestVersion(hit.slug, mcVersion, loader)
       if (!version) throw new Error('Aucune version compatible')
-
       const file = version.files.find((f) => f.primary) ?? version.files[0]
       if (!file) throw new Error('Aucun fichier disponible')
-
       const newMod = await api.mods.install(instanceId, file.url, file.filename)
       setMods((prev) =>
         [...prev.filter((m) => m.name !== newMod.name), newMod]
@@ -225,76 +195,57 @@ export default function Mods() {
     }
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
-    <div className="flex h-full flex-col" style={{ background: '#09090D', color: 'white' }}>
-
-      {/* Header */}
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Sub-header: instance info + tabs + upload */}
       <div
-        className="flex flex-shrink-0 items-center gap-3 px-6 py-3"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        className="flex flex-shrink-0 items-center justify-between gap-4 px-6 py-3"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
       >
-        <button
-          onClick={() => navigate('/home')}
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition-all duration-150"
-          style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.04)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.35)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 15, height: 15 }}>
-            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
-          </svg>
-        </button>
-
-        <div className="flex-1">
-          <h1 className="font-black text-white" style={{ fontSize: 18, letterSpacing: '-0.01em' }}>Mods</h1>
-          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>
-            {instance.name} · {mcVersion} · {loader}
-          </p>
+        <div className="flex gap-1">
+          {(['installed', 'browse'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className="rounded-lg px-4 py-1.5 text-xs font-semibold transition-all duration-150"
+              style={{
+                background: tab === t ? 'rgba(75,63,207,0.25)' : 'transparent',
+                color: tab === t ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
+                border: `1px solid ${tab === t ? 'rgba(75,63,207,0.5)' : 'transparent'}`,
+              }}
+            >
+              {t === 'installed' ? `Installés (${mods.length})` : 'Parcourir Modrinth'}
+            </button>
+          ))}
         </div>
 
-        {tab === 'installed' && (
-          <>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="flex items-center gap-2 font-semibold transition-all duration-200 active:scale-95"
-              style={{
-                height: 36, paddingLeft: 14, paddingRight: 14, borderRadius: 10, fontSize: 13,
-                background: uploading ? 'rgba(40,38,65,0.7)' : '#4B3FCF',
-                boxShadow: uploading ? 'none' : '0 4px 20px rgba(75,63,207,0.35)',
-                cursor: uploading ? 'not-allowed' : 'pointer',
-              }}
-              onMouseEnter={(e) => { if (!uploading) e.currentTarget.style.background = '#6155e8' }}
-              onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.background = '#4B3FCF' }}
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" width={15} height={15}>
-                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-              </svg>
-              {uploading ? 'Import...' : 'Importer'}
-            </button>
-            <input ref={fileInputRef} type="file" accept=".jar" className="hidden" onChange={handleFileChange} />
-          </>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex flex-shrink-0 gap-1 px-6 pt-3 pb-1">
-        {(['installed', 'browse'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className="rounded-lg px-4 py-1.5 text-xs font-semibold transition-all duration-150"
-            style={{
-              background: tab === t ? 'rgba(75,63,207,0.25)' : 'transparent',
-              color: tab === t ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
-              border: `1px solid ${tab === t ? 'rgba(75,63,207,0.5)' : 'transparent'}`,
-            }}
-          >
-            {t === 'installed' ? `Installés (${mods.length})` : 'Parcourir Modrinth'}
-          </button>
-        ))}
+        <div className="flex items-center gap-3">
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>
+            {instance.name} · {mcVersion} · {loader}
+          </span>
+          {tab === 'installed' && (
+            <>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="flex items-center gap-2 font-semibold transition-all duration-200 active:scale-95"
+                style={{
+                  height: 32, paddingLeft: 12, paddingRight: 12, borderRadius: 10, fontSize: 12,
+                  background: uploading ? 'rgba(40,38,65,0.7)' : '#4B3FCF',
+                  cursor: uploading ? 'not-allowed' : 'pointer',
+                }}
+                onMouseEnter={(e) => { if (!uploading) e.currentTarget.style.background = '#6155e8' }}
+                onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.background = '#4B3FCF' }}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
+                  <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+                </svg>
+                {uploading ? 'Import...' : 'Importer'}
+              </button>
+              <input ref={fileInputRef} type="file" accept=".jar" className="hidden" onChange={handleFileChange} />
+            </>
+          )}
+        </div>
       </div>
 
       {/* Content */}
@@ -321,6 +272,53 @@ export default function Mods() {
           />
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Standalone page (kept for /mods route) ────────────────────────────────────
+
+export default function Mods() {
+  const navigate = useNavigate()
+  const { selectedInstance } = useStore()
+  const instance = selectedInstance()
+
+  if (!instance) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4" style={{ background: '#09090D', color: 'white' }}>
+        <div style={{ fontSize: 36 }}>🧱</div>
+        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>Aucune instance sélectionnée</p>
+        <button
+          onClick={() => navigate('/instances')}
+          className="font-semibold transition-all duration-200 active:scale-95"
+          style={{ height: 38, padding: '0 20px', borderRadius: 10, fontSize: 13, background: '#4B3FCF', color: 'white' }}
+        >
+          Gérer les instances
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-full flex-col" style={{ background: '#09090D', color: 'white' }}>
+      <div
+        className="flex flex-shrink-0 items-center gap-3 px-6 py-3"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+      >
+        <button
+          onClick={() => navigate('/home')}
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition-all duration-150"
+          style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.04)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.35)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 15, height: 15 }}>
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+          </svg>
+        </button>
+        <h1 className="font-black text-white" style={{ fontSize: 18, letterSpacing: '-0.01em' }}>Mods</h1>
+      </div>
+      <ModsContent instance={instance} />
     </div>
   )
 }

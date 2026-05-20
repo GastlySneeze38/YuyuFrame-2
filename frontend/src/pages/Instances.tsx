@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
 import type { Instance, Loader } from '@/types'
+import { ModsContent } from '@/pages/Mods'
 
 const LOADERS: Loader[] = ['vanilla', 'fabric', 'forge']
-
 const RAM_OPTIONS = [1024, 2048, 4096, 6144, 8192]
 
 function formatRam(mb: number) {
@@ -59,13 +59,7 @@ function CreateForm({
   }
 
   return (
-    <div
-      className="rounded-2xl p-5 flex flex-col gap-4"
-      style={{ background: 'rgba(75,63,207,0.08)', border: '1px solid rgba(75,63,207,0.25)' }}
-    >
-      <p className="font-bold text-white" style={{ fontSize: 13 }}>Nouvelle instance</p>
-
-      {/* Name */}
+    <div className="flex flex-col gap-4">
       <input
         type="text"
         placeholder="Nom de l'instance..."
@@ -80,10 +74,10 @@ function CreateForm({
         }}
         onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.6)' }}
         onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}
+        autoFocus
       />
 
       <div className="flex gap-3">
-        {/* Version */}
         <div className="flex-1">
           <label style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>Version MC</label>
           <div className="relative mt-1">
@@ -105,7 +99,6 @@ function CreateForm({
           </div>
         </div>
 
-        {/* Loader */}
         <div>
           <label style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>Loader</label>
           <div className="flex gap-1 mt-1">
@@ -128,7 +121,6 @@ function CreateForm({
         </div>
       </div>
 
-      {/* RAM */}
       <div>
         <label style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>RAM</label>
         <div className="flex gap-1.5 mt-1">
@@ -171,6 +163,49 @@ function CreateForm({
   )
 }
 
+// ── Create modal ──────────────────────────────────────────────────────────────
+
+function CreateModal({
+  versions,
+  defaultRam,
+  onClose,
+  onCreate,
+}: {
+  versions: string[]
+  defaultRam: number
+  onClose: () => void
+  onCreate: (instance: Instance) => void
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl p-6 flex flex-col gap-5"
+        style={{ background: '#111118', border: '1px solid rgba(75,63,207,0.3)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}
+      >
+        <div className="flex items-center justify-between">
+          <p className="font-bold text-white" style={{ fontSize: 15 }}>Nouvelle instance</p>
+          <button
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-150"
+            style={{ color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.05)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" width={14} height={14}>
+              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+        </div>
+        <CreateForm versions={versions} defaultRam={defaultRam} onCreate={(inst) => { onCreate(inst); onClose() }} />
+      </div>
+    </div>
+  )
+}
+
 // ── Instance card ─────────────────────────────────────────────────────────────
 
 function InstanceCard({
@@ -202,19 +237,17 @@ function InstanceCard({
         if (!selected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
       }}
     >
-      {/* Icon */}
       <div
         className="flex items-center justify-center rounded-xl flex-shrink-0"
         style={{
-          width: 42, height: 42,
+          width: 38, height: 38,
           background: selected ? 'rgba(75,63,207,0.3)' : 'rgba(255,255,255,0.05)',
-          fontSize: 18,
+          fontSize: 16,
         }}
       >
         🧱
       </div>
 
-      {/* Info */}
       <div className="min-w-0 flex-1">
         <p className="font-bold truncate" style={{ fontSize: 13, color: selected ? 'white' : 'rgba(255,255,255,0.85)' }}>
           {instance.name}
@@ -228,7 +261,6 @@ function InstanceCard({
         </div>
       </div>
 
-      {/* Delete */}
       <div onClick={(e) => e.stopPropagation()}>
         {confirm ? (
           <div className="flex items-center gap-1">
@@ -275,7 +307,10 @@ export default function Instances() {
   } = useStore()
 
   const [loading, setLoading] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
   const loaded = useRef(false)
+
+  const selectedInstance = instances.find((i) => i.id === selectedInstanceId) ?? null
 
   useEffect(() => {
     if (loaded.current) return
@@ -306,7 +341,7 @@ export default function Instances() {
 
       {/* Header */}
       <div
-        className="flex flex-shrink-0 items-center gap-3 px-6 py-3"
+        className="flex flex-shrink-0 items-center gap-3 px-5 py-3"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
       >
         <button
@@ -320,53 +355,97 @@ export default function Instances() {
             <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
           </svg>
         </button>
-        <div>
-          <h1 className="font-black text-white" style={{ fontSize: 18, letterSpacing: '-0.01em' }}>Instances</h1>
-          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>
-            {instances.length} instance{instances.length !== 1 ? 's' : ''}
-          </p>
-        </div>
+
+        <h1 className="font-black text-white" style={{ fontSize: 16, letterSpacing: '-0.01em' }}>Instances</h1>
       </div>
 
-      <div className="flex flex-1 gap-5 overflow-hidden p-5">
+      {/* Body: sidebar + mods panel */}
+      <div className="flex flex-1 overflow-hidden">
 
-        {/* Left: instance list */}
-        <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
-          {loading ? (
-            <div className="flex h-40 items-center justify-center">
-              <span className="h-8 w-8 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.08)', borderTopColor: 'rgba(75,63,207,0.8)' }} />
-            </div>
-          ) : instances.length === 0 ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-3">
-              <div style={{ fontSize: 36 }}>🧱</div>
-              <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>Aucune instance</p>
-              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.2)' }}>Crée ta première instance à droite</p>
-            </div>
+        {/* Left sidebar — instance list */}
+        <div
+          className="flex flex-col overflow-hidden"
+          style={{
+            width: 260,
+            flexShrink: 0,
+            borderRight: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          {/* Scrollable list */}
+          <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
+            {loading ? (
+              <div className="flex h-40 items-center justify-center">
+                <span className="h-7 w-7 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.08)', borderTopColor: 'rgba(75,63,207,0.8)' }} />
+              </div>
+            ) : instances.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2">
+                <div style={{ fontSize: 32 }}>🧱</div>
+                <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>Aucune instance</p>
+              </div>
+            ) : (
+              instances.map((inst) => (
+                <InstanceCard
+                  key={inst.id}
+                  instance={inst}
+                  selected={inst.id === selectedInstanceId}
+                  onSelect={() => setSelectedInstanceId(inst.id)}
+                  onDelete={() => handleDelete(inst.id)}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Fixed bottom button */}
+          <div className="flex-shrink-0 p-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="w-full flex items-center justify-center gap-2 font-bold text-white transition-all duration-200 active:scale-95"
+              style={{
+                height: 44, borderRadius: 12, fontSize: 13,
+                background: '#4B3FCF',
+                boxShadow: '0 4px 20px rgba(75,63,207,0.3)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#6155e8' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = '#4B3FCF' }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" width={15} height={15}>
+                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+              </svg>
+              Nouvelle instance
+            </button>
+          </div>
+        </div>
+
+        {/* Right panel — mods */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {selectedInstance ? (
+            <ModsContent instance={selectedInstance} />
           ) : (
-            instances.map((inst) => (
-              <InstanceCard
-                key={inst.id}
-                instance={inst}
-                selected={inst.id === selectedInstanceId}
-                onSelect={() => setSelectedInstanceId(inst.id)}
-                onDelete={() => handleDelete(inst.id)}
-              />
-            ))
+            <div className="flex flex-1 flex-col items-center justify-center gap-3">
+              <div style={{ fontSize: 32, opacity: 0.4 }}>←</div>
+              <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>
+                Sélectionne une instance
+              </p>
+              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.15)' }}>
+                Les mods s'afficheront ici
+              </p>
+            </div>
           )}
         </div>
-
-        {/* Right: create form */}
-        <div className="w-80 flex-shrink-0">
-          <CreateForm
-            versions={releaseVersions}
-            defaultRam={ram}
-            onCreate={(inst) => {
-              addInstance(inst)
-              setSelectedInstanceId(inst.id)
-            }}
-          />
-        </div>
       </div>
+
+      {/* Create modal */}
+      {showCreate && (
+        <CreateModal
+          versions={releaseVersions}
+          defaultRam={ram}
+          onClose={() => setShowCreate(false)}
+          onCreate={(inst) => {
+            addInstance(inst)
+            setSelectedInstanceId(inst.id)
+          }}
+        />
+      )}
     </div>
   )
 }

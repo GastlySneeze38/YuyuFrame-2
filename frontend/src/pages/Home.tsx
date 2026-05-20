@@ -322,115 +322,120 @@ export default function Home() {
       </div>
 
       {/* ── Footer ── */}
-      <div className="flex overflow-hidden" style={{ flexShrink: 0, flexBasis: '30%', background: '#09090D', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+      <div
+        className="flex flex-shrink-0 flex-col justify-between px-6 py-5"
+        style={{ flexBasis: '30%', minHeight: 160, background: '#09090D', borderTop: '1px solid rgba(255,255,255,0.06)' }}
+      >
+        {/* Middle section: brand + nav + account */}
+        <div className="flex items-center justify-between">
 
-        {/* Left: legal */}
-        <div className="flex flex-col justify-center gap-3 px-7 py-5" style={{ width: '14%', background: 'rgba(255,255,255,0.015)', borderRight: '1px solid rgba(255,255,255,0.05)' }}>
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)', marginBottom: 2 }}>© 2025</span>
-          {['ABOUT', 'Politique', 'EULA', 'README', 'Licence'].map((item) => (
-            <span key={item} className="cursor-pointer transition-colors duration-150" style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.55)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.2)' }}>
-              {item}
+          {/* Brand */}
+          <div className="flex flex-col gap-1">
+            <span className="font-black text-white" style={{ fontSize: 17, letterSpacing: '-0.01em', textShadow: '0 0 24px rgba(75,63,207,0.4)' }}>
+              YuyuFrame
             </span>
-          ))}
-        </div>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', lineHeight: 1.5 }}>
+              Le launcher Minecraft open-source.
+            </span>
+          </div>
 
-        {/* Center: Quêtes */}
-        <div className="flex flex-1 flex-col">
-          <div className="flex items-center gap-4 px-10 pt-6">
-            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
-            <span className="font-bold text-white tracking-widest uppercase" style={{ fontSize: 13 }}>Quêtes</span>
-            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+          {/* Nav links — horizontal */}
+          <div className="flex items-center gap-1">
+            <NavLink label="Instances" onClick={() => navigate('/instances')}>
+              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A1 1 0 013 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9z" /></svg>
+            </NavLink>
+            <NavLink label="Réglages" onClick={() => navigate('/settings')}>
+              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" /></svg>
+            </NavLink>
+            <NavLink label="Compte" onClick={() => navigate('/login')}>
+              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" /></svg>
+            </NavLink>
           </div>
-          <div className="flex flex-1 items-center justify-center">
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.12)' }}>Aucune quête active</span>
-          </div>
-        </div>
 
-        {/* Right: Navigation */}
-        <div className="flex flex-col" style={{ width: '28%', borderLeft: '1px solid rgba(255,255,255,0.05)' }}>
-          <div className="flex items-center gap-4 px-6 pt-6">
-            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
-            <span className="font-bold text-white tracking-widest uppercase" style={{ fontSize: 13 }}>Navigation</span>
-            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
-          </div>
-          <div className="flex-1" />
-          <div className="flex items-center justify-center gap-3 pb-2">
-            <FIcon title="Infos">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" /></svg>
-            </FIcon>
-            <FIcon title="Discord">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z" /></svg>
-            </FIcon>
-            <FIcon title="Paramètres" onClick={() => navigate('/settings')}>
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" /></svg>
-            </FIcon>
-            <FIcon title="Plugins">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A1 1 0 013 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9zM12 4.15L6.04 7.5 12 10.85l5.96-3.35L12 4.15zM5 15.91l6 3.38v-6.71L5 9.21v6.7zm14 0v-6.7l-6 3.37v6.71l6-3.38z" /></svg>
-            </FIcon>
-          </div>
-          <div className="mx-6 h-px" style={{ background: 'rgba(255,255,255,0.05)' }} />
-          <div className="flex items-center justify-center gap-2 px-4 pb-5 pt-2">
-            <NIcon title="Login" active={!!username} label="Login" onClick={() => navigate('/login')}>
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z" /></svg>
-            </NIcon>
-            <NIcon title="Serveurs (bientôt)" disabled>
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M20 3H4v10c0 1.1.9 2 2 2h2v2H6v2h12v-2h-2v-2h2c1.1 0 2-.9 2-2V3zm-2 10H6V5h12v8z" /></svg>
-            </NIcon>
-            <NIcon title="Mods" onClick={() => navigate('/mods')}>
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" /></svg>
-            </NIcon>
-            <NIcon title="Instances" onClick={() => navigate('/instances')}>
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A1 1 0 013 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9zM12 4.15L6.04 7.5 12 10.85l5.96-3.35L12 4.15zM5 15.91l6 3.38v-6.71L5 9.21v6.7zm14 0v-6.7l-6 3.37v6.71l6-3.38z" /></svg>
-            </NIcon>
-            <NIcon title="Statistiques (bientôt)" disabled>
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z" /></svg>
-            </NIcon>
-          </div>
-          {username && (
-            <div className="flex justify-center pb-4">
-              <button onClick={handleLogout} className="transition-colors duration-150" style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgb(248,113,113)' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.2)' }}>
-                Déconnexion
+          {/* Account */}
+          <div className="flex items-center gap-2">
+            {username ? (
+              <>
+                <button
+                  onClick={() => navigate('/login')}
+                  className="flex items-center gap-2 rounded-xl px-3 transition-all duration-150"
+                  style={{ height: 34, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(75,63,207,0.15)'; e.currentTarget.style.borderColor = 'rgba(75,63,207,0.4)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)' }}
+                >
+                  {uuid && (
+                    <img
+                      src={`https://mc-heads.net/avatar/${uuid}/24`}
+                      alt={username}
+                      style={{ width: 18, height: 18, imageRendering: 'pixelated', borderRadius: 4 }}
+                      onError={(e) => { e.currentTarget.style.display = 'none' }}
+                    />
+                  )}
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>{username}</span>
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-xl px-3 transition-all duration-150"
+                  style={{ height: 34, fontSize: 11, color: 'rgba(255,255,255,0.25)', border: '1px solid rgba(255,255,255,0.06)' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'rgb(248,113,113)'; e.currentTarget.style.borderColor = 'rgba(200,50,50,0.3)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.25)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)' }}
+                >
+                  Déconnexion
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => navigate('/login')}
+                className="flex items-center gap-1.5 rounded-xl px-4 font-semibold transition-all duration-200"
+                style={{ height: 34, fontSize: 12, background: '#4B3FCF', color: 'white' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#6155e8' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = '#4B3FCF' }}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z" /></svg>
+                Se connecter
               </button>
-            </div>
-          )}
+            )}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
+
+        {/* Bottom: copyright + legal */}
+        <div className="flex items-center justify-between">
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.15)', fontWeight: 500 }}>
+            © 2025 YuyuFrame — Tous droits réservés
+          </span>
+          <div className="flex items-center gap-4">
+            {['Licence', 'Confidentialité', 'Conditions'].map((label) => (
+              <button
+                key={label}
+                className="transition-colors duration-150"
+                style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)', fontWeight: 500 }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.18)' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
-function FIcon({ children, title, onClick }: { children: React.ReactNode; title: string; onClick?: () => void }) {
+function NavLink({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button title={title} onClick={onClick} className="flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-150" style={{ color: 'rgba(255,255,255,0.25)' }}
-      onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.25)'; e.currentTarget.style.background = 'transparent' }}>
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 rounded-lg px-3 transition-all duration-150"
+      style={{ height: 32, fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.38)' }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.85)'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.38)'; e.currentTarget.style.background = 'transparent' }}
+    >
       {children}
+      {label}
     </button>
-  )
-}
-
-function NIcon({ children, title, active, label, disabled, onClick }: {
-  children: React.ReactNode; title: string; active?: boolean; label?: string; disabled?: boolean; onClick?: () => void
-}) {
-  return (
-    <div className="flex flex-col items-center gap-0.5">
-      <button title={title} onClick={disabled ? undefined : onClick}
-        className="flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-150"
-        style={{
-          color: disabled ? 'rgba(255,255,255,0.12)' : active ? '#7dd3fc' : 'rgba(255,255,255,0.3)',
-          background: active ? 'rgba(125,211,252,0.08)' : 'transparent',
-          boxShadow: active ? '0 0 14px rgba(125,211,252,0.18)' : 'none',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-        }}
-        onMouseEnter={(e) => { if (!disabled && !active) { e.currentTarget.style.color = 'rgba(255,255,255,0.65)'; e.currentTarget.style.background = 'rgba(255,255,255,0.05)' } }}
-        onMouseLeave={(e) => { if (!disabled && !active) { e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; e.currentTarget.style.background = 'transparent' } }}>
-        {children}
-      </button>
-      {active && label && <span style={{ fontSize: 8, color: 'rgba(125,211,252,0.5)' }}>{label}</span>}
-    </div>
   )
 }
