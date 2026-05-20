@@ -70,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         // Mods
         .route("/api/mods", get(routes::mods::list_mods))
         .route("/api/mods/upload", post(routes::mods::upload_mod))
+        .route("/api/mods/install", post(routes::mods::install_from_url))
         .route("/api/mods/:name/toggle", put(routes::mods::toggle_mod))
         .route("/api/mods/:name", delete(routes::mods::delete_mod))
         .layer(cors)

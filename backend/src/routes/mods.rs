@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::minecraft::launcher::minecraft_dir;
@@ -159,4 +159,67 @@ pub async fn upload_mod(
     }
 
     Err((StatusCode::BAD_REQUEST, "Aucun fichier fourni".to_string()))
+}
+
+// ── Install from Modrinth URL ─────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct InstallRequest {
+    pub url: String,
+    pub filename: String,
+}
+
+pub async fn install_from_url(
+    State(_state): State<SharedState>,
+    Json(req): Json<InstallRequest>,
+) -> Result<Json<ModInfo>, (StatusCode, String)> {
+    // Only allow Modrinth CDN to prevent SSRF
+    if !req.url.starts_with("https://cdn.modrinth.com/") {
+        return Err((StatusCode::FORBIDDEN, "URL non autorisée".to_string()));
+    }
+
+    let safe_name = std::path::Path::new(&req.filename)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mod.jar".to_string());
+
+    if !safe_name.ends_with(".jar") {
+        return Err((StatusCode::BAD_REQUEST, "Seuls les fichiers .jar sont acceptés".to_string()));
+    }
+
+    let dir = mods_dir();
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("YuyuFrame/1.0")
+        .build()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let resp = client
+        .get(&req.url)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Err((StatusCode::BAD_GATEWAY, format!("Téléchargement échoué: {}", resp.status())));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+
+    let dest = dir.join(&safe_name);
+    tokio::fs::write(&dest, &bytes)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ModInfo {
+        name: safe_name,
+        size: bytes.len() as u64,
+        enabled: true,
+    }))
 }

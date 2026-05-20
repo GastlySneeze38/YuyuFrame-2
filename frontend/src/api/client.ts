@@ -117,6 +117,9 @@ export const api = {
       return res.json()
     },
     delete: (name: string) => del<void>(`/api/mods/${encodeURIComponent(name)}`),
+    install: (url: string, filename: string) =>
+      post<Mod>('/api/mods/install', { url, filename }),
+
     upload: async (file: File): Promise<Mod> => {
       const form = new FormData()
       form.append('file', file)
