@@ -58,6 +58,10 @@ interface Store {
   // ── Game state ─────────────────────────────────────────────────────────────
   gameRunning: boolean
   setGameRunning: (r: boolean) => void
+
+  // ── Last session ───────────────────────────────────────────────────────────
+  lastSession: { instanceName: string; at: string } | null
+  setLastSession: (s: { instanceName: string; at: string }) => void
 }
 
 export const useStore = create<Store>()(
@@ -156,6 +160,10 @@ export const useStore = create<Store>()(
       // Game
       gameRunning: false,
       setGameRunning: (gameRunning) => set({ gameRunning }),
+
+      // Last session
+      lastSession: null,
+      setLastSession: (lastSession) => set({ lastSession }),
     }),
     {
       name: 'yuyuframe-store',
@@ -168,6 +176,7 @@ export const useStore = create<Store>()(
         brightness: s.brightness,
         username: s.username,
         uuid: s.uuid,
+        lastSession: s.lastSession,
       }),
     }
   )

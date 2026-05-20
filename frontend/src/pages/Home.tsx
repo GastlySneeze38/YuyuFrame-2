@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
+import { getVersion } from '@tauri-apps/api/app'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
 
@@ -31,10 +32,13 @@ export default function Home() {
     instances, setInstances,
     selectedInstanceId, setSelectedInstanceId, selectedInstance,
     gameRunning, setGameRunning,
+    lastSession, setLastSession,
   } = useStore()
 
   const [progress, setProgress] = useState<DownloadProgress | null>(null)
   const [launchMsg, setLaunchMsg] = useState('')
+  const [appVersion, setAppVersion] = useState('')
+  const [modCounts, setModCounts] = useState<{ active: number; total: number } | null>(null)
 
   const instance = selectedInstance()
 
@@ -45,7 +49,15 @@ export default function Home() {
         setSelectedInstanceId(list[0].id)
       }
     }).catch(() => {})
+    getVersion().then(setAppVersion).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!selectedInstanceId) { setModCounts(null); return }
+    api.mods.list(selectedInstanceId).then((mods) => {
+      setModCounts({ active: mods.filter((m) => m.enabled).length, total: mods.length })
+    }).catch(() => setModCounts(null))
+  }, [selectedInstanceId])
 
   useEffect(() => {
     let unlistenProgress: (() => void) | null = null
@@ -86,6 +98,7 @@ export default function Home() {
     try {
       await api.launch.start(selectedInstanceId)
       setGameRunning(true)
+      if (instance) setLastSession({ instanceName: instance.name, at: new Date().toISOString() })
     } catch (e) {
       setLaunchMsg(e instanceof Error ? e.message : 'Erreur de lancement')
     }
@@ -323,10 +336,10 @@ export default function Home() {
 
       {/* ── Footer ── */}
       <div
-        className="flex flex-shrink-0 flex-col justify-between px-6 py-5"
+        className="flex flex-shrink-0 flex-col justify-between px-6 py-4"
         style={{ flexBasis: '30%', minHeight: 160, background: '#09090D', borderTop: '1px solid rgba(255,255,255,0.06)' }}
       >
-        {/* Middle section: brand + nav + account */}
+        {/* Top section: brand + nav + account */}
         <div className="flex items-center justify-between">
 
           {/* Brand */}
@@ -398,6 +411,26 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Stats row */}
+        <div className="flex items-center gap-3">
+          {instance && (
+            <>
+              <StatPill label="Instance" value={`${instance.loader} · ${instance.mc_version}`} />
+              <StatPill label="RAM" value={instance.ram_mb >= 1024 ? `${instance.ram_mb / 1024} Go` : `${instance.ram_mb} Mo`} />
+              {modCounts !== null && (
+                <StatPill label="Mods" value={`${modCounts.active} / ${modCounts.total}`} />
+              )}
+            </>
+          )}
+          <StatPill
+            label="Dernière session"
+            value={lastSession
+              ? `${formatRelative(lastSession.at)}${instance?.name !== lastSession.instanceName ? ` · ${lastSession.instanceName}` : ''}`
+              : 'Jamais'}
+          />
+          {appVersion && <StatPill label="Launcher" value={`v${appVersion}`} />}
+        </div>
+
         {/* Divider */}
         <div className="h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
 
@@ -423,6 +456,29 @@ export default function Home() {
       </div>
     </div>
   )
+}
+
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        flex: 1, height: 44, borderRadius: 12,
+        background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+      }}
+    >
+      <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.6)' }}>{value}</span>
+    </div>
+  )
+}
+
+function formatRelative(iso: string): string {
+  const d = new Date(iso)
+  const diff = Math.floor((Date.now() - d.getTime()) / 86_400_000)
+  if (diff === 0) return "Aujourd'hui"
+  if (diff === 1) return 'Hier'
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
 }
 
 function NavLink({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
