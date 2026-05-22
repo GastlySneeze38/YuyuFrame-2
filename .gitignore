@@ -49,6 +49,7 @@ frontend/dist/
 
 # ── Backend (Rust) ──
 backend/target/
+target/
 yuyu.db-shm
 yuyu.db-wal
 yuyu.db
