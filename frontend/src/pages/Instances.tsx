@@ -300,7 +300,7 @@ export default function Instances() {
     versions, setVersions,
     instances, setInstances, addInstance, updateInstance, removeInstance,
     selectedInstanceId, setSelectedInstanceId,
-    ram,
+    defaultRam,
   } = useStore()
 
   const [loading, setLoading] = useState(true)
@@ -493,7 +493,7 @@ export default function Instances() {
       {showCreate && (
         <CreateModal
           versions={releaseVersions}
-          defaultRam={ram}
+          defaultRam={defaultRam}
           onClose={() => setShowCreate(false)}
           onCreate={(inst) => {
             addInstance(inst)

@@ -25,11 +25,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { theme, brightness } = useStore()
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-  }, [theme])
+  const { brightness } = useStore()
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-primary">

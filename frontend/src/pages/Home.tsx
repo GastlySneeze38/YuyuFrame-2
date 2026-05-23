@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
 
@@ -33,6 +34,7 @@ export default function Home() {
     selectedInstanceId, setSelectedInstanceId, selectedInstance,
     gameRunning, setGameRunning,
     lastSession, setLastSession,
+    closeOnLaunch,
   } = useStore()
 
   const [progress, setProgress] = useState<DownloadProgress | null>(null)
@@ -72,7 +74,10 @@ export default function Home() {
 
     listen<{ running: boolean }>('game_state', (event) => {
       setGameRunning(event.payload.running)
-      if (!event.payload.running) setProgress(null)
+      if (!event.payload.running) {
+        setProgress(null)
+        getCurrentWindow().show()
+      }
     }).then((fn) => { unlistenState = fn })
 
     listen<string>('launch_error', (event) => {
@@ -107,6 +112,7 @@ export default function Home() {
       await api.launch.start(selectedInstanceId)
       setGameRunning(true)
       if (instance) setLastSession({ instanceName: instance.name, at: new Date().toISOString() })
+      if (closeOnLaunch) getCurrentWindow().hide()
     } catch (e) {
       setLaunchMsg(e instanceof Error ? e.message : 'Erreur de lancement')
     }

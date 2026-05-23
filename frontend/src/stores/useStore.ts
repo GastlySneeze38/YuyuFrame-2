@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Instance, Theme, Version, Account } from '@/types'
+import type { Instance, Version, Account } from '@/types'
 
 interface Store {
   // ── YuyuFrame session (NOT persisted — requires password on each start) ──
@@ -8,11 +8,6 @@ interface Store {
   yuyuUsername: string | null
   setYuyuSession: (token: string, username: string) => void
   clearYuyuSession: () => void
-
-  // ── Theme ──────────────────────────────────────────────────────────────────
-  theme: Theme
-  setTheme: (t: Theme) => void
-  toggleTheme: () => void
 
   // ── Active Minecraft account ───────────────────────────────────────────────
   username: string | null
@@ -43,14 +38,11 @@ interface Store {
   selectedInstance: () => Instance | null
 
   // ── Settings (persisted) ──────────────────────────────────────────────────
-  ram: number
-  setRam: (r: number) => void
+  defaultRam: number
+  setDefaultRam: (r: number) => void
 
-  javaPath: string
-  setJavaPath: (p: string) => void
-
-  minecraftPath: string
-  setMinecraftPath: (p: string) => void
+  closeOnLaunch: boolean
+  setCloseOnLaunch: (v: boolean) => void
 
   brightness: number
   setBrightness: (b: number) => void
@@ -73,17 +65,6 @@ export const useStore = create<Store>()(
       setYuyuSession: (token, username) => set({ yuyuToken: token, yuyuUsername: username }),
       clearYuyuSession: () =>
         set({ yuyuToken: null, yuyuUsername: null, accounts: [], username: null, uuid: null }),
-
-      // Theme
-      theme: 'chill',
-      setTheme: (theme) => {
-        set({ theme })
-        document.documentElement.setAttribute('data-theme', theme)
-      },
-      toggleTheme: () => {
-        const next = get().theme === 'chill' ? 'gamer' : 'chill'
-        get().setTheme(next)
-      },
 
       // Active MC account
       username: null,
@@ -145,14 +126,11 @@ export const useStore = create<Store>()(
       },
 
       // Settings
-      ram: 4096,
-      setRam: (ram) => set({ ram }),
+      defaultRam: 4096,
+      setDefaultRam: (defaultRam) => set({ defaultRam }),
 
-      javaPath: '',
-      setJavaPath: (javaPath) => set({ javaPath }),
-
-      minecraftPath: '',
-      setMinecraftPath: (minecraftPath) => set({ minecraftPath }),
+      closeOnLaunch: false,
+      setCloseOnLaunch: (closeOnLaunch) => set({ closeOnLaunch }),
 
       brightness: 100,
       setBrightness: (brightness) => set({ brightness }),
@@ -168,11 +146,9 @@ export const useStore = create<Store>()(
     {
       name: 'yuyuframe-store',
       partialize: (s) => ({
-        theme: s.theme,
         selectedInstanceId: s.selectedInstanceId,
-        ram: s.ram,
-        javaPath: s.javaPath,
-        minecraftPath: s.minecraftPath,
+        defaultRam: s.defaultRam,
+        closeOnLaunch: s.closeOnLaunch,
         brightness: s.brightness,
         username: s.username,
         uuid: s.uuid,
