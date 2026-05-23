@@ -599,16 +599,22 @@ fn build_game_args(
     assets_dir: &PathBuf,
     version_id: &str,
 ) -> Vec<String> {
+    let assets_root = assets_dir.to_string_lossy().into_owned();
+    let game_dir_str = game_dir.to_string_lossy().into_owned();
     let replacements: &[(&str, &str)] = &[
         ("${auth_player_name}", &session.username),
         ("${version_name}", version_id),
-        ("${game_directory}", &game_dir.to_string_lossy()),
-        ("${assets_root}", &assets_dir.to_string_lossy()),
+        ("${game_directory}", &game_dir_str),
+        ("${assets_root}", &assets_root),
         ("${assets_index_name}", &details.asset_index.id),
         ("${auth_uuid}", &session.uuid),
         ("${auth_access_token}", &session.access_token),
         ("${user_type}", "msa"),
         ("${version_type}", "release"),
+        // Vieilles versions (1.7.x–1.12.x)
+        ("${user_properties}", "{}"),
+        ("${game_assets}", &assets_root),
+        ("${auth_session}", &session.access_token),
     ];
 
     let apply = |s: &str| -> String {
