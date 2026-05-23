@@ -231,10 +231,11 @@ pub async fn download_and_launch(
     // ── Loader-specific setup ────────────────────────────────────────────────
     // Les assets continuent de se télécharger en arrière-plan pendant ce temps.
 
-    let required_java = details.java_version.as_ref().map(|j| j.major_version).unwrap_or(17);
+    // Pas de javaVersion dans le manifest = ancienne version MC → Java 8 requis (LaunchWrapper)
+    let required_java = details.java_version.as_ref().map(|j| j.major_version).unwrap_or(8);
     let java_component = details.java_version.as_ref()
         .map(|j| j.component.as_str())
-        .unwrap_or("java-runtime-gamma");
+        .unwrap_or("jre-legacy"); // composant Mojang pour Java 8
     let java = ensure_java(java_component, required_java, &mc_dir, &client, &app).await?;
     let java_major = detect_java_major_version(&java).await.unwrap_or(17);
     tracing::info!("MC {} requiert Java {} — utilise : {}", version_id, required_java, java);
@@ -774,7 +775,9 @@ fn mojang_platform_key() -> &'static str {
     }
 }
 
-/// Cherche un JDK système dont la version majeure est >= `required_major`.
+/// Cherche un JDK système compatible avec `required_major`.
+/// Java 8 : version exacte requise (LaunchWrapper incompatible Java 9+).
+/// Java 9+ : version minimale (n'importe quelle version >= required_major convient).
 fn find_system_java(required_major: u32) -> Option<String> {
     let roots: &[&str] = if cfg!(target_os = "windows") {
         &[
@@ -791,13 +794,17 @@ fn find_system_java(required_major: u32) -> Option<String> {
         &["/usr/lib/jvm", "/usr/local/lib/jvm", "/opt/java"]
     };
 
+    // Pour Java 8 : on n'accepte que Java 8 (LaunchWrapper plante sur Java 9+)
+    // Pour Java 9+ : on accepte n'importe quelle version >= required
+    let max_major = if required_major <= 8 { 8 } else { u32::MAX };
+
     let mut best: Option<(u32, String)> = None;
     for root in roots {
         let Ok(entries) = std::fs::read_dir(root) else { continue };
         for entry in entries.flatten() {
             let dir_name = entry.file_name().to_string_lossy().to_lowercase();
             let Some(major) = java_major_from_dir_name(&dir_name) else { continue };
-            if major < required_major { continue; }
+            if major < required_major || major > max_major { continue; }
             let exe = if cfg!(target_os = "macos") {
                 entry.path().join("Contents").join("Home").join("bin").join("java")
             } else {
