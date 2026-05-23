@@ -5,6 +5,7 @@ use tauri::Emitter;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::state::{DownloadProgress, MinecraftSession, SharedState};
+use super::deps;
 use super::fabric;
 use super::forge;
 use super::versions::{
@@ -257,6 +258,11 @@ async fn setup_fabric(
 
     if let Err(e) = fabric::ensure_fabric_api(mc_version, mods_dir).await {
         tracing::warn!("Fabric API auto-install échoué: {}", e);
+    }
+
+    set_progress(app, 74, 100, "Résolution des dépendances des mods...");
+    if let Err(e) = deps::resolve_and_install_deps(mc_version, "fabric", mods_dir, app).await {
+        tracing::warn!("Résolution des dépendances échouée: {}", e);
     }
 
     let mut fabric_cp = Vec::new();

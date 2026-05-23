@@ -16,9 +16,18 @@ function lineColor(line: string, level: 'out' | 'err'): string {
 export default function Console() {
   const [logs, setLogs] = useState<LogLine[]>([])
   const [running, setRunning] = useState(true)
+  const [copied, setCopied] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const counterRef = useRef(0)
   const bufferRef = useRef<LogLine[]>([])
+
+  function copyAll() {
+    const text = logs.map((l) => l.line).join('\n')
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
 
   useEffect(() => {
     let rafId: number
@@ -71,13 +80,28 @@ export default function Console() {
         <span style={{ color: running ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.28)' }}>
           {running ? 'Minecraft en cours...' : 'Jeu terminé'}
         </span>
-        <span className="ml-auto" style={{ color: 'rgba(255,255,255,0.18)' }}>
-          {logs.length} lignes
-        </span>
+        <span style={{ color: 'rgba(255,255,255,0.18)' }}>{logs.length} lignes</span>
+        <button
+          onClick={copyAll}
+          disabled={logs.length === 0}
+          className="ml-auto"
+          style={{
+            background: 'none',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '4px',
+            color: copied ? '#4ade80' : 'rgba(255,255,255,0.45)',
+            cursor: logs.length === 0 ? 'default' : 'pointer',
+            fontSize: '11px',
+            padding: '1px 8px',
+            transition: 'color 0.15s',
+          }}
+        >
+          {copied ? '✓ Copié' : 'Copier tout'}
+        </button>
       </div>
 
       {/* Log output */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="selectable min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {logs.length === 0 && (
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.18)' }}>
             En attente des logs...

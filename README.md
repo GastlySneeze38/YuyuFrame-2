@@ -1,5 +1,8 @@
 Voici un résumé structuré des fonctionnalités principales à développer, par ordre de priorité.
 Fonctionnalités CORE (indispensables au lancement)
+
+Server. Connection : ssh ghasty@192.168.1.100
+
 1. Serveur en 1 clic
 
 Configuration automatique du serveur sur le PC du user

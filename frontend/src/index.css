@@ -35,7 +35,9 @@
 }
 
 input,
-textarea {
+textarea,
+.selectable,
+.selectable * {
   -webkit-user-select: text;
   user-select: text;
 }
