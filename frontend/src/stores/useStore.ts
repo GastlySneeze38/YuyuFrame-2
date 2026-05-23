@@ -13,6 +13,7 @@ interface Store {
   setYuyuSession: (token: string, username: string, plan: YuyuPlan, planExpiresAt: number | null) => void
   clearYuyuSession: () => void
   isPremium: () => boolean
+  isUltimate: () => boolean
 
   // ── Active Minecraft account ───────────────────────────────────────────────
   username: string | null
@@ -78,6 +79,11 @@ export const useStore = create<Store>()(
         const active = yuyuPlan === 'premium' || yuyuPlan === 'ultimate'
         const notExpired = yuyuPlanExpiresAt === null || yuyuPlanExpiresAt > Date.now() / 1000
         return active && notExpired
+      },
+      isUltimate: () => {
+        const { yuyuPlan, yuyuPlanExpiresAt } = get()
+        const notExpired = yuyuPlanExpiresAt === null || yuyuPlanExpiresAt > Date.now() / 1000
+        return yuyuPlan === 'ultimate' && notExpired
       },
 
       // Active MC account

@@ -112,6 +112,26 @@ pub fn check_premium(conn: &Connection, user_id: i64) -> Result<bool> {
     }
 }
 
+/// Retourne le plan actif de l'utilisateur ("free" si expiré ou inconnu).
+pub fn get_active_plan(conn: &Connection, user_id: i64) -> Result<String> {
+    let row = conn.query_row(
+        "SELECT plan, plan_expires_at FROM users WHERE id = ?1",
+        params![user_id],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?)),
+    );
+    match row {
+        Ok((plan, expires_at)) => {
+            let is_paid = plan == "premium" || plan == "ultimate";
+            let not_expired = expires_at
+                .map(|exp| exp > chrono::Utc::now().timestamp())
+                .unwrap_or(true);
+            if is_paid && not_expired { Ok(plan) } else { Ok("free".into()) }
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok("free".into()),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn set_user_plan(
     conn: &Connection,
     user_id: i64,

@@ -58,6 +58,18 @@ fn require_premium(state: &crate::state::AppState) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
+fn require_ultimate(state: &crate::state::AppState) -> Result<(), String> {
+    let session = state
+        .yuyu_session
+        .as_ref()
+        .ok_or_else(|| String::from("Non connecté à YuyuFrame"))?;
+    if !session.is_ultimate() {
+        return Err(String::from("Abonnement Ultimate requis pour cette fonctionnalité"));
+    }
+    Ok(())
+}
+
 // ── Save listing ───────────────────────────────────────────────────────────────
 
 fn dir_size(path: &PathBuf) -> u64 {

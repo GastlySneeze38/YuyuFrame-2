@@ -34,9 +34,14 @@ pub struct SyncInstanceResp {
     pub updated_at: i64,
 }
 
-const QUOTA_MAX_SAVES: i64 = 3;
-const QUOTA_MAX_INSTANCES_WITH_SAVES: i64 = 3;
-const QUOTA_MAX_INSTANCES_NO_SAVES: i64 = 4;
+/// (max_saves_total, max_instances_with_saves, max_instances_no_saves)
+fn plan_quotas(plan: &str) -> (i64, i64, i64) {
+    match plan {
+        "ultimate" => (10, 10, 10),
+        "premium"  => (3, 3, 4),
+        _          => (0, 0, 0),
+    }
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -66,6 +71,20 @@ fn require_premium(conn: &rusqlite::Connection, user_id: i64) -> Result<(), ApiE
         return Err((
             StatusCode::PAYMENT_REQUIRED,
             "Abonnement Premium requis pour cette fonctionnalité".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Vérifie que l'utilisateur a un plan ultimate actif.
+#[allow(dead_code)]
+fn require_ultimate(conn: &rusqlite::Connection, user_id: i64) -> Result<(), ApiError> {
+    let plan = db::get_active_plan(conn, user_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if plan != "ultimate" {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            "Abonnement Ultimate requis pour cette fonctionnalité".into(),
         ));
     }
     Ok(())
@@ -105,6 +124,10 @@ async fn upsert_instance(
     let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     require_premium(&conn, user_id)?;
 
+    let plan = db::get_active_plan(&conn, user_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let (quota_saves, quota_inst_with, quota_inst_without) = plan_quotas(&plan);
+
     let existing = db::sync_get_by_name(&conn, user_id, &body.instance_name)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -114,36 +137,30 @@ async fn upsert_instance(
     let new_save_count = body.save_count as i64;
 
     if let Some(ref ex) = existing {
-        // Update: check that changing save_count doesn't exceed global quota
         let delta = new_save_count - ex.save_count as i64;
         let projected_saves = total_saves + delta;
-        if projected_saves > QUOTA_MAX_SAVES {
+        if projected_saves > quota_saves {
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
-                format!("Quota de saves dépassé : {}/{} utilisées", total_saves, QUOTA_MAX_SAVES),
+                format!("Quota de saves dépassé : {}/{} utilisées (plan {})", total_saves, quota_saves, plan),
             ));
         }
     } else {
-        // New instance: check instance count and save quota
         let projected_saves = total_saves + new_save_count;
-        let max_instances = if projected_saves > 0 {
-            QUOTA_MAX_INSTANCES_WITH_SAVES
-        } else {
-            QUOTA_MAX_INSTANCES_NO_SAVES
-        };
+        let max_instances = if projected_saves > 0 { quota_inst_with } else { quota_inst_without };
         if total_instances >= max_instances {
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
                 format!(
-                    "Quota d'instances atteint : {}/{} (avec {} save(s) au total)",
-                    total_instances, max_instances, total_saves
+                    "Quota d'instances atteint : {}/{} (plan {})",
+                    total_instances, max_instances, plan
                 ),
             ));
         }
-        if projected_saves > QUOTA_MAX_SAVES {
+        if projected_saves > quota_saves {
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
-                format!("Quota de saves dépassé : {}/{} utilisées", total_saves, QUOTA_MAX_SAVES),
+                format!("Quota de saves dépassé : {}/{} utilisées (plan {})", total_saves, quota_saves, plan),
             ));
         }
     }

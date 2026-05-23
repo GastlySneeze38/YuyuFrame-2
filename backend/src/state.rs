@@ -25,13 +25,18 @@ pub struct YuyuSession {
 }
 
 impl YuyuSession {
-    pub fn is_premium(&self) -> bool {
-        let active = self.plan == "premium" || self.plan == "ultimate";
-        let not_expired = self
-            .plan_expires_at
+    fn plan_not_expired(&self) -> bool {
+        self.plan_expires_at
             .map(|exp| exp > chrono::Utc::now().timestamp())
-            .unwrap_or(true);
-        active && not_expired
+            .unwrap_or(true)
+    }
+
+    pub fn is_premium(&self) -> bool {
+        (self.plan == "premium" || self.plan == "ultimate") && self.plan_not_expired()
+    }
+
+    pub fn is_ultimate(&self) -> bool {
+        self.plan == "ultimate" && self.plan_not_expired()
     }
 }
 

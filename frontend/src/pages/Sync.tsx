@@ -111,8 +111,14 @@ function SaveToggle({
 // ── Instances sync card ───────────────────────────────────────────────────────
 
 function InstancesSyncCard() {
-  const { instances, yuyuToken, isPremium } = useStore()
+  const { instances, yuyuToken, yuyuPlan, isPremium, isUltimate } = useStore()
   const userIsPremium = isPremium()
+  const userIsUltimate = isUltimate()
+
+  // Quotas selon le plan (identiques au serveur)
+  const QUOTA_SAVES     = userIsUltimate ? 10 : 3
+  const QUOTA_INST_WITH = userIsUltimate ? 10 : 3
+  const QUOTA_INST_WITHOUT = userIsUltimate ? 10 : 4
 
   const [cloudInstances, setCloudInstances] = useState<SyncInstance[]>([])
   const [cloudLoading, setCloudLoading] = useState(false)
@@ -143,18 +149,18 @@ function InstancesSyncCard() {
 
   // How many save slots this instance currently "owns" in the cloud
   const ownedSaves = existingCloudEntry?.save_count ?? 0
-  // Max saves we can select for this push (capped by global quota)
-  const MAX_SAVES = Math.min(3, 3 - totalCloudSaves + ownedSaves)
+  // Max saves sélectionnables pour ce push (plafonné par le quota global du plan)
+  const MAX_SAVES = Math.min(QUOTA_SAVES, QUOTA_SAVES - totalCloudSaves + ownedSaves)
 
   // After push: projected totals
   const projectedTotalSaves = totalCloudSaves - ownedSaves + selectedSaves.size
   const projectedInstances = isNewEntry ? cloudInstances.length + 1 : cloudInstances.length
-  const projectedMaxInstances = projectedTotalSaves > 0 ? 3 : 4
+  const projectedMaxInstances = projectedTotalSaves > 0 ? QUOTA_INST_WITH : QUOTA_INST_WITHOUT
 
   const quotaError: string | null = (() => {
     if (!selectedLocalId) return null
-    if (projectedTotalSaves > 3)
-      return `Quota de saves dépassé : ${projectedTotalSaves}/3`
+    if (projectedTotalSaves > QUOTA_SAVES)
+      return `Quota de saves dépassé : ${projectedTotalSaves}/${QUOTA_SAVES}`
     if (isNewEntry && projectedInstances > projectedMaxInstances)
       return `Quota d'instances atteint : ${cloudInstances.length}/${projectedMaxInstances}`
     return null
@@ -598,6 +604,9 @@ function InstancesSyncCard() {
 
 export default function Sync() {
   const navigate = useNavigate()
+  const { yuyuPlan } = useStore()
+  const planLabel = yuyuPlan === 'ultimate' ? 'ULTIMATE' : 'PREMIUM'
+  const planColor = yuyuPlan === 'ultimate' ? { color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' } : { color: '#818cf8', bg: 'rgba(75,63,207,0.18)' }
 
   return (
     <div className="flex h-full flex-col" style={{ background: '#09090D', color: 'white' }}>
@@ -623,8 +632,8 @@ export default function Sync() {
           Synchronisation
         </h1>
 
-        <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(75,63,207,0.18)', padding: '2px 8px', borderRadius: 6, letterSpacing: '0.05em' }}>
-          PREMIUM
+        <span style={{ fontSize: 10, fontWeight: 700, color: planColor.color, background: planColor.bg, padding: '2px 8px', borderRadius: 6, letterSpacing: '0.05em' }}>
+          {planLabel}
         </span>
       </div>
 
