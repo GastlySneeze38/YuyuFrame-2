@@ -39,10 +39,24 @@ pub fn run() {
                     }
                 });
 
+            // Restaurer la session MC active depuis la DB si un utilisateur est connecté
+            let mc_session = yuyu_session.as_ref().and_then(|ys| {
+                let active_uuid = db::get_active_mc_uuid(&conn, ys.user_id).ok().flatten()?;
+                let row = db::get_mc_session(&conn, ys.user_id, &active_uuid).ok().flatten()?;
+                tracing::info!("Session Minecraft restaurée pour {}", row.mc_username);
+                Some(state::MinecraftSession {
+                    username: row.mc_username,
+                    uuid: row.mc_uuid,
+                    access_token: row.access_token,
+                    refresh_token: Some(row.ms_refresh_token),
+                    expires_at: row.expires_at,
+                })
+            });
+
             let app_state: state::SharedState = Arc::new(RwLock::new(state::AppState {
                 db: Arc::new(Mutex::new(conn)),
                 yuyu_session,
-                session: None,
+                session: mc_session,
                 download_progress: None,
                 game_running: false,
                 auth_device_code: None,

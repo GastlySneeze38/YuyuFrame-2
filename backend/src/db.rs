@@ -46,11 +46,6 @@ pub fn init_db(path: &Path) -> Result<Connection> {
          );",
     )?;
 
-    let _ = conn.execute(
-        "ALTER TABLE instances ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
-
     Ok(conn)
 }
 
