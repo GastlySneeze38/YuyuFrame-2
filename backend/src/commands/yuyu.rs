@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{db, state::SharedState};
 
-const API_BASE: &str = "http://localhost:3000";
+fn api_base() -> String {
+    std::env::var("YUYU_API_URL").unwrap_or_else(|_| "http://localhost:3000".into())
+}
 
 // ── Types retournés au frontend ───────────────────────────────────────────────
 
@@ -50,7 +52,7 @@ pub async fn yuyu_register(
 ) -> Result<LoginResp, String> {
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{API_BASE}/auth/register"))
+        .post(format!("{}/auth/register", api_base()))
         .json(&serde_json::json!({ "username": username, "password": password }))
         .send()
         .await
@@ -78,7 +80,7 @@ pub async fn yuyu_login(
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{API_BASE}/auth/login"))
+        .post(format!("{}/auth/login", api_base()))
         .json(&serde_json::json!({ "username": username, "password": password }))
         .send()
         .await

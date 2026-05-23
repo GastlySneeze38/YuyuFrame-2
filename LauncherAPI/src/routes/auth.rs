@@ -1,4 +1,9 @@
-use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::{get, post},
+    Json, Router,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{db, jwt, state::AppState};
@@ -16,12 +21,19 @@ pub struct AuthResponse {
     username: String,
 }
 
+#[derive(Serialize)]
+pub struct MeResponse {
+    user_id: i64,
+    username: String,
+}
+
 type ApiError = (StatusCode, String);
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
+        .route("/auth/me", get(me))
 }
 
 async fn register(
@@ -83,4 +95,20 @@ async fn login(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(AuthResponse { token, user_id: user.id, username: user.username }))
+}
+
+async fn me(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<MeResponse>, ApiError> {
+    let token = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Token manquant".into()))?;
+
+    let claims = jwt::decode_jwt(token, &state.jwt_secret)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Token invalide ou expiré".into()))?;
+
+    Ok(Json(MeResponse { user_id: claims.sub, username: claims.username }))
 }

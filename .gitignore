@@ -57,3 +57,7 @@ launcher.db
 
 # ── YuyuFrame data ──
 session.json
+
+# ── Secrets ──
+.env
+!.env.example
