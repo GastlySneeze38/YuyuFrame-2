@@ -44,11 +44,16 @@ fn row_to_instance(r: db::InstanceRow) -> Instance {
     Instance { id: r.id, name: r.name, mc_version: r.mc_version, loader: r.loader, ram_mb: r.ram_mb, favorite: r.favorite }
 }
 
+fn user_id(s: &crate::state::AppState) -> i64 {
+    s.yuyu_session.as_ref().map(|y| y.user_id).unwrap_or(0)
+}
+
 #[tauri::command]
 pub async fn instance_list(state: tauri::State<'_, SharedState>) -> Result<Vec<Instance>, String> {
     let s = state.read().await;
+    let uid = user_id(&s);
     let db = s.db.lock().await;
-    db::instance_list(&db)
+    db::instance_list(&db, uid)
         .map(|rows| rows.into_iter().map(row_to_instance).collect())
         .map_err(|e| e.to_string())
 }
@@ -70,8 +75,9 @@ pub async fn instance_create(
         .map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
     let s = state.read().await;
+    let uid = user_id(&s);
     let db = s.db.lock().await;
-    db::instance_insert(&db, &id, &name, &mc_version, &loader, ram_mb)
+    db::instance_insert(&db, &id, uid, &name, &mc_version, &loader, ram_mb)
         .map_err(|e| e.to_string())?;
     Ok(Instance { id, name, mc_version, loader, ram_mb, favorite: false })
 }
@@ -83,8 +89,9 @@ pub async fn instance_delete(
 ) -> Result<(), String> {
     {
         let s = state.read().await;
+        let uid = user_id(&s);
         let db = s.db.lock().await;
-        db::instance_delete(&db, &id).map_err(|e| e.to_string())?;
+        db::instance_delete(&db, &id, uid).map_err(|e| e.to_string())?;
     }
     let dir = instance_dir(&id);
     if dir.exists() {
@@ -99,12 +106,13 @@ pub async fn instance_toggle_favorite(
     id: String,
 ) -> Result<Instance, String> {
     let s = state.read().await;
+    let uid = user_id(&s);
     let db = s.db.lock().await;
-    let row = db::instance_get(&db, &id)
+    let row = db::instance_get(&db, &id, uid)
         .map_err(|e| e.to_string())?
         .ok_or("Instance introuvable")?;
-    db::instance_set_favorite(&db, &id, !row.favorite).map_err(|e| e.to_string())?;
-    let updated = db::instance_get(&db, &id)
+    db::instance_set_favorite(&db, &id, uid, !row.favorite).map_err(|e| e.to_string())?;
+    let updated = db::instance_get(&db, &id, uid)
         .map_err(|e| e.to_string())?
         .ok_or("Instance introuvable")?;
     Ok(row_to_instance(updated))
@@ -121,10 +129,11 @@ pub async fn instance_update(
 ) -> Result<Instance, String> {
     let name = name.trim().to_string();
     let s = state.read().await;
+    let uid = user_id(&s);
     let db = s.db.lock().await;
-    db::instance_update(&db, &id, &name, &mc_version, &loader, ram_mb)
+    db::instance_update(&db, &id, uid, &name, &mc_version, &loader, ram_mb)
         .map_err(|e| e.to_string())?;
-    let row = db::instance_get(&db, &id)
+    let row = db::instance_get(&db, &id, uid)
         .map_err(|e| e.to_string())?
         .ok_or("Instance introuvable")?;
     Ok(row_to_instance(row))

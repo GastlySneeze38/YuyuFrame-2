@@ -190,6 +190,8 @@ async fn save_session(
         let s = state.read().await;
         let conn = s.db.lock().await;
         db::save_yuyu_jwt(&conn, user_id, username, jwt).map_err(|e| e.to_string())?;
+        // Adopte les instances créées avant la connexion (yuyu_user_id = 0)
+        db::instance_claim_unclaimed(&conn, user_id).ok();
     }
     state.write().await.yuyu_session = Some(crate::state::YuyuSession {
         user_id,

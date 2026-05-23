@@ -22,8 +22,9 @@ pub async fn launch_game(
 
     let instance = {
         let s = state.read().await;
+        let user_id = s.yuyu_session.as_ref().map(|y| y.user_id).unwrap_or(0);
         let db = s.db.lock().await;
-        db::instance_get(&db, &instance_id)
+        db::instance_get(&db, &instance_id, user_id)
             .map_err(|e| e.to_string())?
             .ok_or("Instance introuvable")?
     };

@@ -32,6 +32,8 @@ pub fn run() {
                 .flatten()
                 .map(|row| {
                     tracing::info!("Session YuyuFrame restaurée pour {}", row.username);
+                    // Adopte les instances orphelines (yuyu_user_id = 0) au redémarrage
+                    db::instance_claim_unclaimed(&conn, row.user_id).ok();
                     state::YuyuSession {
                         user_id: row.user_id,
                         username: row.username,

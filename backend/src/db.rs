@@ -9,7 +9,6 @@ pub fn init_db(path: &Path) -> Result<Connection> {
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
 
-         -- Sessions Minecraft (tokens stockés uniquement en local, jamais envoyés au serveur)
          CREATE TABLE IF NOT EXISTS mc_sessions (
              id               INTEGER PRIMARY KEY AUTOINCREMENT,
              yuyu_user_id     INTEGER NOT NULL,
@@ -27,7 +26,6 @@ pub fn init_db(path: &Path) -> Result<Connection> {
              mc_uuid      TEXT    NOT NULL
          );
 
-         -- JWT YuyuFrame reçu du serveur (une seule ligne, pas de credentials Minecraft)
          CREATE TABLE IF NOT EXISTS yuyu_session (
              id        INTEGER PRIMARY KEY CHECK (id = 1),
              jwt       TEXT    NOT NULL,
@@ -37,14 +35,20 @@ pub fn init_db(path: &Path) -> Result<Connection> {
          );
 
          CREATE TABLE IF NOT EXISTS instances (
-             id         TEXT    PRIMARY KEY,
-             name       TEXT    NOT NULL,
-             mc_version TEXT    NOT NULL,
-             loader     TEXT    NOT NULL,
-             ram_mb     INTEGER NOT NULL DEFAULT 4096,
-             created_at INTEGER NOT NULL
+             id           TEXT    PRIMARY KEY,
+             yuyu_user_id INTEGER NOT NULL DEFAULT 0,
+             name         TEXT    NOT NULL,
+             mc_version   TEXT    NOT NULL,
+             loader       TEXT    NOT NULL,
+             ram_mb       INTEGER NOT NULL DEFAULT 4096,
+             favorite     INTEGER NOT NULL DEFAULT 0,
+             created_at   INTEGER NOT NULL
          );",
     )?;
+
+    // Migrations pour les DBs existantes
+    let _ = conn.execute("ALTER TABLE instances ADD COLUMN yuyu_user_id INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE instances ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0", []);
 
     Ok(conn)
 }
@@ -234,12 +238,13 @@ pub struct InstanceRow {
     pub favorite: bool,
 }
 
-pub fn instance_list(conn: &Connection) -> Result<Vec<InstanceRow>> {
+pub fn instance_list(conn: &Connection, user_id: i64) -> Result<Vec<InstanceRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, mc_version, loader, ram_mb, favorite FROM instances ORDER BY created_at ASC",
+        "SELECT id, name, mc_version, loader, ram_mb, favorite FROM instances
+         WHERE yuyu_user_id = ?1 ORDER BY created_at ASC",
     )?;
     let rows = stmt
-        .query_map([], |r| {
+        .query_map(params![user_id], |r| {
             Ok(InstanceRow {
                 id: r.get(0)?,
                 name: r.get(1)?,
@@ -253,11 +258,12 @@ pub fn instance_list(conn: &Connection) -> Result<Vec<InstanceRow>> {
     Ok(rows)
 }
 
-pub fn instance_get(conn: &Connection, id: &str) -> Result<Option<InstanceRow>> {
+pub fn instance_get(conn: &Connection, id: &str, user_id: i64) -> Result<Option<InstanceRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, mc_version, loader, ram_mb, favorite FROM instances WHERE id = ?1",
+        "SELECT id, name, mc_version, loader, ram_mb, favorite FROM instances
+         WHERE id = ?1 AND yuyu_user_id = ?2",
     )?;
-    match stmt.query_row(params![id], |r| {
+    match stmt.query_row(params![id, user_id], |r| {
         Ok(InstanceRow {
             id: r.get(0)?,
             name: r.get(1)?,
@@ -273,10 +279,10 @@ pub fn instance_get(conn: &Connection, id: &str) -> Result<Option<InstanceRow>> 
     }
 }
 
-pub fn instance_set_favorite(conn: &Connection, id: &str, favorite: bool) -> Result<()> {
+pub fn instance_set_favorite(conn: &Connection, id: &str, user_id: i64, favorite: bool) -> Result<()> {
     conn.execute(
-        "UPDATE instances SET favorite = ?1 WHERE id = ?2",
-        params![favorite as i64, id],
+        "UPDATE instances SET favorite = ?1 WHERE id = ?2 AND yuyu_user_id = ?3",
+        params![favorite as i64, id, user_id],
     )?;
     Ok(())
 }
@@ -284,6 +290,7 @@ pub fn instance_set_favorite(conn: &Connection, id: &str, favorite: bool) -> Res
 pub fn instance_insert(
     conn: &Connection,
     id: &str,
+    user_id: i64,
     name: &str,
     mc_version: &str,
     loader: &str,
@@ -291,8 +298,9 @@ pub fn instance_insert(
 ) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "INSERT INTO instances (id, name, mc_version, loader, ram_mb, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, name, mc_version, loader, ram_mb, now],
+        "INSERT INTO instances (id, yuyu_user_id, name, mc_version, loader, ram_mb, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, user_id, name, mc_version, loader, ram_mb, now],
     )?;
     Ok(())
 }
@@ -300,14 +308,16 @@ pub fn instance_insert(
 pub fn instance_update(
     conn: &Connection,
     id: &str,
+    user_id: i64,
     name: &str,
     mc_version: &str,
     loader: &str,
     ram_mb: u32,
 ) -> Result<()> {
     let n = conn.execute(
-        "UPDATE instances SET name=?1, mc_version=?2, loader=?3, ram_mb=?4 WHERE id=?5",
-        params![name, mc_version, loader, ram_mb, id],
+        "UPDATE instances SET name=?1, mc_version=?2, loader=?3, ram_mb=?4
+         WHERE id=?5 AND yuyu_user_id=?6",
+        params![name, mc_version, loader, ram_mb, id, user_id],
     )?;
     if n == 0 {
         return Err(anyhow::anyhow!("Instance introuvable"));
@@ -315,7 +325,19 @@ pub fn instance_update(
     Ok(())
 }
 
-pub fn instance_delete(conn: &Connection, id: &str) -> Result<()> {
-    conn.execute("DELETE FROM instances WHERE id = ?1", params![id])?;
+pub fn instance_delete(conn: &Connection, id: &str, user_id: i64) -> Result<()> {
+    conn.execute(
+        "DELETE FROM instances WHERE id = ?1 AND yuyu_user_id = ?2",
+        params![id, user_id],
+    )?;
+    Ok(())
+}
+
+/// Reassigne les instances orphelines (yuyu_user_id = 0) à l'utilisateur qui vient de se connecter.
+pub fn instance_claim_unclaimed(conn: &Connection, user_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE instances SET yuyu_user_id = ?1 WHERE yuyu_user_id = 0",
+        params![user_id],
+    )?;
     Ok(())
 }

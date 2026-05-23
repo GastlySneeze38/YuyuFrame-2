@@ -245,8 +245,9 @@ pub async fn sync_push_instance(
     let (token, instance) = {
         let s = state.read().await;
         let token = get_token(&s)?;
+        let user_id = s.yuyu_session.as_ref().map(|y| y.user_id).unwrap_or(0);
         let conn = s.db.lock().await;
-        let row = db::instance_get(&conn, &instance_id)
+        let row = db::instance_get(&conn, &instance_id, user_id)
             .map_err(|e| e.to_string())?
             .ok_or("Instance introuvable")?;
         (token, row)
