@@ -36,6 +36,13 @@ pub async fn fetch_version_list() -> Result<Vec<VersionInfo>> {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct JavaVersionInfo {
+    pub component: String,
+    #[serde(rename = "majorVersion")]
+    pub major_version: u32,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct VersionDetails {
     pub id: String,
     #[serde(rename = "mainClass")]
@@ -47,6 +54,8 @@ pub struct VersionDetails {
     pub libraries: Vec<Library>,
     #[serde(rename = "assetIndex")]
     pub asset_index: AssetIndex,
+    #[serde(rename = "javaVersion")]
+    pub java_version: Option<JavaVersionInfo>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,7 +78,7 @@ pub struct Artifact {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Library {
     pub name: String,
     pub downloads: Option<LibraryDownloads>,
@@ -79,7 +88,7 @@ pub struct Library {
     pub extract: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct LibraryDownloads {
     pub artifact: Option<Artifact>,
     /// Old format native JARs keyed by classifier ("natives-windows", etc.)
@@ -97,7 +106,7 @@ pub struct AssetIndexFile {
     pub objects: HashMap<String, AssetObject>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AssetObject {
     pub hash: String,
     pub size: u64,

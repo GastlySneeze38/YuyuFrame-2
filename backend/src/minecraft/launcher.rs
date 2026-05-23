@@ -1,8 +1,11 @@
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use tauri::Emitter;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 use crate::state::{DownloadProgress, MinecraftSession, SharedState};
 use super::deps;
@@ -61,121 +64,180 @@ pub async fn download_and_launch(
     set_progress(&app, 5, 100, "Récupération des détails...");
     let details = fetch_version_details(&version_info.url).await?;
 
+    // Client HTTP partagé — pool de connexions réutilisées pour tous les téléchargements
+    let client = Arc::new(reqwest::Client::builder()
+        .pool_max_idle_per_host(32)
+        .build()?);
+
+    // ── Assets en tâche de fond — démarre immédiatement, indépendant des libs ──
+    // Les assets et les libs sont totalement indépendants : on les télécharge en parallèle.
+    let assets_task = {
+        let client = client.clone();
+        let app = app.clone();
+        let assets_dir = assets_dir.clone();
+        let asset_index = details.asset_index.clone();
+        tokio::spawn(async move {
+            let asset_index_path = assets_dir
+                .join("indexes")
+                .join(format!("{}.json", asset_index.id));
+            tokio::fs::create_dir_all(asset_index_path.parent().unwrap()).await?;
+            if !asset_index_path.exists() {
+                download_file(&client, &asset_index.url, &asset_index_path).await?;
+            }
+            let index_file = fetch_asset_index(&asset_index.url).await?;
+            let objects_dir = assets_dir.join("objects");
+            let total_assets = index_file.objects.len() as u64;
+
+            let sem = Arc::new(Semaphore::new(32));
+            let mut tasks: JoinSet<Result<()>> = JoinSet::new();
+
+            for obj in index_file.objects.into_values() {
+                let sem = sem.clone();
+                let client = client.clone();
+                let objects_dir = objects_dir.clone();
+                tasks.spawn(async move {
+                    let prefix = &obj.hash[..2];
+                    let obj_dir = objects_dir.join(prefix);
+                    let obj_path = obj_dir.join(&obj.hash);
+                    if !obj_path.exists() {
+                        let _permit = sem.acquire().await.unwrap();
+                        tokio::fs::create_dir_all(&obj_dir).await?;
+                        let url = format!(
+                            "https://resources.download.minecraft.net/{}/{}",
+                            prefix, obj.hash
+                        );
+                        download_file(&client, &url, &obj_path).await.ok();
+                    }
+                    Ok::<(), anyhow::Error>(())
+                });
+            }
+
+            let mut done = 0u64;
+            while let Some(r) = tasks.join_next().await {
+                r??;
+                done += 1;
+                if done % 200 == 0 || done == total_assets {
+                    set_progress(
+                        &app,
+                        50 + done * 40 / total_assets.max(1),
+                        100,
+                        &format!("Assets {}/{}", done, total_assets),
+                    );
+                }
+            }
+            anyhow::Ok(())
+        })
+    };
+
     let client_jar = versions_dir.join(format!("{}.jar", version_id));
     if !client_jar.exists() {
         set_progress(&app, 10, 100, "Téléchargement du client Minecraft...");
-        download_file(&details.downloads.client.url, &client_jar).await?;
+        download_file(&client, &details.downloads.client.url, &client_jar).await?;
     }
 
     set_progress(&app, 20, 100, "Téléchargement des bibliothèques...");
-    let mut classpath = Vec::new();
     let total_libs = details.libraries.len() as u64;
-    let os_key = if cfg!(target_os = "windows") {
-        "windows"
-    } else if cfg!(target_os = "macos") {
-        "osx"
-    } else {
-        "linux"
-    };
 
-    for (i, lib) in details.libraries.iter().enumerate() {
+    // 16 téléchargements simultanés — équilibre bande passante / charge serveur Mojang
+    let lib_sem = Arc::new(Semaphore::new(16));
+    let mut lib_tasks: JoinSet<Result<(Option<String>, Vec<PathBuf>)>> = JoinSet::new();
+
+    for lib in details.libraries.iter() {
         if !should_download_library(lib) {
             continue;
         }
-        if let Some(ref dl) = lib.downloads {
-            if let Some(ref artifact) = dl.artifact {
-                let lib_path = artifact_path(&libraries_dir, artifact, &lib.name);
+        let Some(ref dl) = lib.downloads else { continue };
+
+        let lib_name = lib.name.clone();
+        let artifact = dl.artifact.clone();
+        let classifiers = dl.classifiers.clone();
+        let natives_map = lib.natives.clone();
+        let sem = lib_sem.clone();
+        let client = client.clone();
+        let libraries_dir = libraries_dir.clone();
+
+        lib_tasks.spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+            let mut cp_entry = None;
+            let mut native_paths = Vec::new();
+
+            if let Some(art) = artifact {
+                let lib_path = artifact_path(&libraries_dir, &art, &lib_name);
                 if let Some(parent) = lib_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
                 if !lib_path.exists() {
-                    download_file(&artifact.url, &lib_path).await?;
+                    download_file(&client, &art.url, &lib_path).await?;
                 }
-                if lib.name.contains(":natives-") {
-                    extract_natives(&lib_path, &natives_dir).await.ok();
-                } else {
-                    classpath.push(lib_path.to_string_lossy().to_string());
+                // Les JARs natifs (":natives-xxx") sont extraits vers natives_dir
+                // ET ajoutés au classpath : LWJGL 3.x utilise le classpath comme fallback
+                // si l'extraction échoue ou si java.library.path n'est pas trouvé.
+                cp_entry = Some(lib_path.to_string_lossy().to_string());
+                if lib_name.contains(":natives-") {
+                    native_paths.push(lib_path);
                 }
             }
 
-            if let (Some(ref natives_map), Some(ref classifiers)) =
-                (&lib.natives, &dl.classifiers)
-            {
+            if let (Some(natives_map), Some(classifiers)) = (natives_map, classifiers) {
+                let os_key = if cfg!(target_os = "windows") { "windows" }
+                    else if cfg!(target_os = "macos") { "osx" }
+                    else { "linux" };
                 if let Some(classifier_key) = natives_map.get(os_key) {
                     let key = classifier_key.replace(
                         "${arch}",
                         if cfg!(target_pointer_width = "64") { "64" } else { "32" },
                     );
-                    if let Some(native_artifact) = classifiers.get(&key) {
+                    if let Some(native_art) = classifiers.get(&key) {
                         let native_path = artifact_path(
                             &libraries_dir,
-                            native_artifact,
-                            &format!("{}:{}", lib.name, key),
+                            native_art,
+                            &format!("{}:{}", lib_name, key),
                         );
                         if let Some(parent) = native_path.parent() {
                             tokio::fs::create_dir_all(parent).await?;
                         }
                         if !native_path.exists() {
-                            download_file(&native_artifact.url, &native_path).await?;
+                            download_file(&client, &native_art.url, &native_path).await?;
                         }
-                        extract_natives(&native_path, &natives_dir).await.ok();
+                        native_paths.push(native_path);
                     }
                 }
             }
-        }
-        if i as u64 % 10 == 0 {
-            set_progress(
-                &app,
-                20 + i as u64 * 30 / total_libs.max(1),
-                100,
-                &format!("Bibliothèques {}/{}", i + 1, total_libs),
-            );
+
+            Ok((cp_entry, native_paths))
+        });
+    }
+
+    let mut classpath = Vec::new();
+    let mut natives_to_extract = Vec::new();
+    let mut libs_done = 0u64;
+    while let Some(result) = lib_tasks.join_next().await {
+        let (cp_entry, native_paths) = result??;
+        if let Some(cp) = cp_entry { classpath.push(cp); }
+        natives_to_extract.extend(native_paths);
+        libs_done += 1;
+        if libs_done % 10 == 0 || libs_done == total_libs {
+            set_progress(&app, 20 + libs_done * 30 / total_libs.max(1), 100,
+                &format!("Bibliothèques {}/{}", libs_done, total_libs));
         }
     }
 
-    // ── Assets ────────────────────────────────────────────────────────────────
-
-    let asset_index_path = assets_dir
-        .join("indexes")
-        .join(format!("{}.json", details.asset_index.id));
-    tokio::fs::create_dir_all(asset_index_path.parent().unwrap()).await?;
-
-    if !asset_index_path.exists() {
-        download_file(&details.asset_index.url, &asset_index_path).await?;
-    }
-
-    let asset_index = fetch_asset_index(&details.asset_index.url).await?;
-    let objects_dir = assets_dir.join("objects");
-    let total_assets = asset_index.objects.len() as u64;
-    let mut asset_count = 0u64;
-
-    for obj in asset_index.objects.values() {
-        let prefix = &obj.hash[..2];
-        let obj_dir = objects_dir.join(prefix);
-        let obj_path = obj_dir.join(&obj.hash);
-        if !obj_path.exists() {
-            tokio::fs::create_dir_all(&obj_dir).await?;
-            let url = format!(
-                "https://resources.download.minecraft.net/{}/{}",
-                prefix, obj.hash
-            );
-            download_file(&url, &obj_path).await.ok();
-        }
-        asset_count += 1;
-        if asset_count % 200 == 0 {
-            set_progress(
-                &app,
-                50 + asset_count * 20 / total_assets.max(1),
-                100,
-                &format!("Assets {}/{}", asset_count, total_assets),
-            );
+    for np in natives_to_extract {
+        if let Err(e) = extract_natives(&np, &natives_dir).await {
+            tracing::warn!("Extraction natives échouée pour {} : {}", np.display(), e);
         }
     }
 
     // ── Loader-specific setup ────────────────────────────────────────────────
+    // Les assets continuent de se télécharger en arrière-plan pendant ce temps.
 
-    let java = find_java()?;
+    let required_java = details.java_version.as_ref().map(|j| j.major_version).unwrap_or(17);
+    let java_component = details.java_version.as_ref()
+        .map(|j| j.component.as_str())
+        .unwrap_or("java-runtime-gamma");
+    let java = ensure_java(java_component, required_java, &mc_dir, &client, &app).await?;
     let java_major = detect_java_major_version(&java).await.unwrap_or(17);
+    tracing::info!("MC {} requiert Java {} — utilise : {}", version_id, required_java, java);
 
     let (main_class, extra_classpath, extra_game_args, extra_jvm_args) =
         match loader.unwrap_or("vanilla") {
@@ -183,6 +245,10 @@ pub async fn download_and_launch(
             "forge" => setup_forge(version_id, &mc_dir, &libraries_dir, &java, &app).await?,
             _ => (details.main_class.clone(), vec![], vec![], vec![]),
         };
+
+    // ── Attente des assets ────────────────────────────────────────────────────
+    // Libs + loader terminés, on attend que les assets finissent avant de lancer.
+    assets_task.await.map_err(|e| anyhow!("Tâche assets : {}", e))??;
 
     // ── Launch ───────────────────────────────────────────────────────────────
 
@@ -372,6 +438,7 @@ fn build_jvm_args(ram_mb: u32, natives_dir: &PathBuf, java_major: u32) -> Vec<St
         format!("-Xmx{}m", ram_mb),
         format!("-Xms{}m", ram_mb),  // Xms = Xmx : pas de redimensionnement du heap
         format!("-Djava.library.path={}", natives_dir.display()),
+        format!("-Dorg.lwjgl.librarypath={}", natives_dir.display()),
         "-XX:+DisableExplicitGC".into(),       // Ignore System.gc() appelés par les mods
         "-XX:+AlwaysPreTouch".into(),          // Pré-alloue les pages RAM au boot
         "-XX:+PerfDisableSharedMem".into(),    // Pas de fichiers perf OS (source de jitter)
@@ -453,7 +520,15 @@ fn artifact_key(path: &str) -> String {
         let rel = &normalized[idx + marker.len()..];
         let parts: Vec<&str> = rel.split('/').collect();
         if parts.len() >= 3 {
-            return parts[..parts.len() - 2].join("/");
+            let group_artifact = parts[..parts.len() - 2].join("/");
+            let filename = parts.last().unwrap_or(&"");
+            // Les JARs natifs ("-natives-") ont une clé unique par fichier :
+            // on ne les déduplique pas entre eux (x86_64 ≠ arm64),
+            // et ils ne doivent pas effacer le JAR principal du même artifact.
+            if filename.contains("-natives-") {
+                return format!("{}/{}", group_artifact, filename);
+            }
+            return group_artifact;
         }
     }
     normalized
@@ -552,28 +627,208 @@ fn build_game_args(
     args
 }
 
-pub fn find_java() -> Result<String> {
-    #[cfg(target_os = "windows")]
-    {
-        let candidates = [
-            r"C:\Program Files\Java\jre-21\bin\java.exe",
-            r"C:\Program Files\Eclipse Adoptium\jdk-21\bin\java.exe",
-            r"C:\Program Files\Microsoft\jdk-21\bin\java.exe",
-            r"C:\Program Files\Java\jdk-21\bin\java.exe",
-            r"C:\Program Files\Java\jre-17\bin\java.exe",
-            r"C:\Program Files\Eclipse Adoptium\jdk-17\bin\java.exe",
-            r"C:\Program Files\Microsoft\jdk-17\bin\java.exe",
-            r"C:\Program Files\Java\jdk-17\bin\java.exe",
-        ];
-        for path in &candidates {
-            if std::path::Path::new(path).exists() { return Ok(path.to_string()); }
+const MOJANG_JAVA_MANIFEST: &str =
+    "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
+
+/// Retourne un exécutable Java prêt à l'emploi pour `required_major`.
+/// Ordre de priorité : JAVA_HOME → install système → runtime Mojang en cache → téléchargement Mojang.
+pub async fn ensure_java(
+    component: &str,
+    required_major: u32,
+    mc_dir: &PathBuf,
+    client: &reqwest::Client,
+    app: &tauri::AppHandle,
+) -> Result<String> {
+    // 1. JAVA_HOME
+    if let Ok(home) = std::env::var("JAVA_HOME") {
+        let exe = PathBuf::from(&home).join("bin").join(java_exe_name());
+        if exe.exists() {
+            if let Some(v) = detect_java_major_version(&exe.to_string_lossy()).await {
+                if v >= required_major {
+                    return Ok(exe.to_string_lossy().to_string());
+                }
+            }
         }
     }
-    Ok("java".to_string())
+
+    // 2. Installation système
+    if let Some(java) = find_system_java(required_major) {
+        return Ok(java);
+    }
+
+    // 3. Runtime Mojang déjà téléchargé
+    let runtime_dir = mc_dir.join("runtime").join(component);
+    let java_exe = if cfg!(target_os = "macos") {
+        runtime_dir.join("jre.bundle").join("Contents").join("Home").join("bin").join("java")
+    } else {
+        runtime_dir.join("bin").join(java_exe_name())
+    };
+    if java_exe.exists() {
+        return Ok(java_exe.to_string_lossy().to_string());
+    }
+
+    // 4. Téléchargement depuis Mojang
+    tracing::info!("Java {} ({}) introuvable — téléchargement depuis Mojang", required_major, component);
+    set_progress(app, 12, 100, &format!("Téléchargement Java {} (Mojang)...", required_major));
+    download_mojang_runtime(component, &runtime_dir, client, app).await?;
+
+    if java_exe.exists() {
+        Ok(java_exe.to_string_lossy().to_string())
+    } else {
+        Err(anyhow!("Runtime Java installé mais introuvable à {}", java_exe.display()))
+    }
 }
 
-async fn download_file(url: &str, path: &PathBuf) -> Result<()> {
-    let client = reqwest::Client::new();
+async fn download_mojang_runtime(
+    component: &str,
+    dest: &PathBuf,
+    client: &reqwest::Client,
+    app: &tauri::AppHandle,
+) -> Result<()> {
+    let platform = mojang_platform_key();
+
+    let all: serde_json::Value = client.get(MOJANG_JAVA_MANIFEST).send().await?.json().await?;
+
+    let manifest_url = all
+        .get(platform).and_then(|p| p.get(component))
+        .and_then(|c| c.get(0)).and_then(|e| e.get("manifest"))
+        .and_then(|m| m.get("url")).and_then(|u| u.as_str())
+        .ok_or_else(|| anyhow!("Runtime Mojang '{}' indisponible pour '{}'", component, platform))?
+        .to_string();
+
+    let file_manifest: serde_json::Value = client.get(&manifest_url).send().await?.json().await?;
+    let files = file_manifest["files"]
+        .as_object()
+        .ok_or_else(|| anyhow!("Manifest Java invalide"))?;
+
+    // Crée d'abord tous les répertoires (pas de concurrence nécessaire)
+    for (rel_path, info) in files.iter() {
+        if info["type"].as_str() == Some("directory") {
+            tokio::fs::create_dir_all(dest.join(rel_path)).await?;
+        }
+    }
+
+    let total = files.len() as u64;
+    let sem = Arc::new(Semaphore::new(24));
+    let mut tasks: JoinSet<Result<()>> = JoinSet::new();
+
+    for (rel_path, info) in files.iter() {
+        match info["type"].as_str().unwrap_or("") {
+            "file" => {
+                let url = info["downloads"]["raw"]["url"].as_str().unwrap_or("").to_string();
+                let executable = info["executable"].as_bool().unwrap_or(false);
+                let file_dest = dest.join(rel_path);
+                let sem = sem.clone();
+                let client = client.clone();
+                tasks.spawn(async move {
+                    if !file_dest.exists() {
+                        let _permit = sem.acquire().await.unwrap();
+                        if let Some(p) = file_dest.parent() {
+                            tokio::fs::create_dir_all(p).await?;
+                        }
+                        download_file(&client, &url, &file_dest).await?;
+                    }
+                    #[cfg(unix)]
+                    if executable {
+                        use std::os::unix::fs::PermissionsExt;
+                        tokio::fs::set_permissions(&file_dest, std::fs::Permissions::from_mode(0o755)).await?;
+                    }
+                    let _ = executable;
+                    Ok::<(), anyhow::Error>(())
+                });
+            }
+            #[cfg(unix)]
+            "link" => {
+                let target = info["target"].as_str().unwrap_or("").to_string();
+                let link = dest.join(rel_path);
+                if !link.exists() {
+                    if let Some(p) = link.parent() { tokio::fs::create_dir_all(p).await?; }
+                    tokio::fs::symlink(&target, &link).await.ok();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut done = 0u64;
+    while let Some(r) = tasks.join_next().await {
+        r??;
+        done += 1;
+        if done % 100 == 0 || done == total {
+            set_progress(app, 12 + done * 8 / total.max(1), 100,
+                &format!("Java runtime {}/{}", done, total));
+        }
+    }
+    Ok(())
+}
+
+fn mojang_platform_key() -> &'static str {
+    if cfg!(target_os = "windows") {
+        if cfg!(target_arch = "aarch64") { "windows-arm64" }
+        else if cfg!(target_pointer_width = "64") { "windows-x64" }
+        else { "windows-x86" }
+    } else if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") { "mac-os-arm64" } else { "mac-os" }
+    } else {
+        if cfg!(target_pointer_width = "64") { "linux" } else { "linux-i386" }
+    }
+}
+
+/// Cherche un JDK système dont la version majeure est >= `required_major`.
+fn find_system_java(required_major: u32) -> Option<String> {
+    let roots: &[&str] = if cfg!(target_os = "windows") {
+        &[
+            r"C:\Program Files\Java",
+            r"C:\Program Files\Eclipse Adoptium",
+            r"C:\Program Files\Microsoft",
+            r"C:\Program Files\BellSoft",
+            r"C:\Program Files\Amazon Corretto",
+            r"C:\Program Files\Semeru Runtime",
+        ]
+    } else if cfg!(target_os = "macos") {
+        &["/Library/Java/JavaVirtualMachines"]
+    } else {
+        &["/usr/lib/jvm", "/usr/local/lib/jvm", "/opt/java"]
+    };
+
+    let mut best: Option<(u32, String)> = None;
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else { continue };
+        for entry in entries.flatten() {
+            let dir_name = entry.file_name().to_string_lossy().to_lowercase();
+            let Some(major) = java_major_from_dir_name(&dir_name) else { continue };
+            if major < required_major { continue; }
+            let exe = if cfg!(target_os = "macos") {
+                entry.path().join("Contents").join("Home").join("bin").join("java")
+            } else {
+                entry.path().join("bin").join(java_exe_name())
+            };
+            if exe.exists() && (best.is_none() || major < best.as_ref().unwrap().0) {
+                best = Some((major, exe.to_string_lossy().to_string()));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+fn java_exe_name() -> &'static str {
+    if cfg!(target_os = "windows") { "java.exe" } else { "java" }
+}
+
+/// Extrait la version majeure depuis un nom de répertoire JDK.
+/// Reconnaît : "jdk-21", "jre-21", "jdk-21.0.3+9", "java-21-openjdk-amd64", "temurin-21", etc.
+fn java_major_from_dir_name(name: &str) -> Option<u32> {
+    let stripped = name
+        .strip_prefix("jdk-")
+        .or_else(|| name.strip_prefix("jre-"))
+        .or_else(|| name.strip_prefix("java-"))
+        .or_else(|| name.strip_prefix("temurin-"))
+        .or_else(|| name.strip_prefix("corretto-"))
+        .or_else(|| name.strip_prefix("semeru-"))?;
+    stripped.split(['.', '+', '-', '_']).next()?.parse().ok()
+}
+
+async fn download_file(client: &reqwest::Client, url: &str, path: &PathBuf) -> Result<()> {
     let resp = client.get(url).send().await?;
     if !resp.status().is_success() {
         return Err(anyhow!("Download failed {}: {}", url, resp.status()));
