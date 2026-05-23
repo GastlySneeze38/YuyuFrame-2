@@ -12,6 +12,7 @@ pub struct Instance {
     pub mc_version: String,
     pub loader: String,
     pub ram_mb: u32,
+    pub favorite: bool,
 }
 
 fn yuyu_dir() -> PathBuf {
@@ -40,7 +41,7 @@ fn gen_id() -> String {
 }
 
 fn row_to_instance(r: db::InstanceRow) -> Instance {
-    Instance { id: r.id, name: r.name, mc_version: r.mc_version, loader: r.loader, ram_mb: r.ram_mb }
+    Instance { id: r.id, name: r.name, mc_version: r.mc_version, loader: r.loader, ram_mb: r.ram_mb, favorite: r.favorite }
 }
 
 #[tauri::command]
@@ -72,7 +73,7 @@ pub async fn instance_create(
     let db = s.db.lock().await;
     db::instance_insert(&db, &id, &name, &mc_version, &loader, ram_mb)
         .map_err(|e| e.to_string())?;
-    Ok(Instance { id, name, mc_version, loader, ram_mb })
+    Ok(Instance { id, name, mc_version, loader, ram_mb, favorite: false })
 }
 
 #[tauri::command]
@@ -90,6 +91,23 @@ pub async fn instance_delete(
         tokio::fs::remove_dir_all(&dir).await.map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn instance_toggle_favorite(
+    state: tauri::State<'_, SharedState>,
+    id: String,
+) -> Result<Instance, String> {
+    let s = state.read().await;
+    let db = s.db.lock().await;
+    let row = db::instance_get(&db, &id)
+        .map_err(|e| e.to_string())?
+        .ok_or("Instance introuvable")?;
+    db::instance_set_favorite(&db, &id, !row.favorite).map_err(|e| e.to_string())?;
+    let updated = db::instance_get(&db, &id)
+        .map_err(|e| e.to_string())?
+        .ok_or("Instance introuvable")?;
+    Ok(row_to_instance(updated))
 }
 
 #[tauri::command]

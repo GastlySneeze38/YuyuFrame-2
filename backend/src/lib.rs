@@ -75,6 +75,7 @@ pub fn run() {
             commands::instances::instance_create,
             commands::instances::instance_delete,
             commands::instances::instance_update,
+            commands::instances::instance_toggle_favorite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

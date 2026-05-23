@@ -33,6 +33,7 @@ pub async fn launch_game(
         mc_version: instance.mc_version,
         loader: instance.loader,
         ram_mb: instance.ram_mb,
+        favorite: instance.favorite,
     };
 
     let game_dir = instance_dir(&instance_id);

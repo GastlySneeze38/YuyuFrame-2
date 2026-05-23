@@ -44,6 +44,7 @@ export interface Instance {
   mc_version: string
   loader: Loader
   ram_mb: number
+  favorite: boolean
 }
 
 export type Theme = 'chill' | 'gamer'

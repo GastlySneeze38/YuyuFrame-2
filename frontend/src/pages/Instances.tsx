@@ -212,11 +212,13 @@ function InstanceCard({
   instance,
   selected,
   onSelect,
+  onToggleFavorite,
   onDelete,
 }: {
   instance: Instance
   selected: boolean
   onSelect: () => void
+  onToggleFavorite: () => void
   onDelete: () => void
 }) {
   const [confirm, setConfirm] = useState(false)
@@ -230,20 +232,12 @@ function InstanceCard({
         border: `1px solid ${selected ? 'rgba(75,63,207,0.55)' : 'rgba(255,255,255,0.06)'}`,
         boxShadow: selected ? '0 0 20px rgba(75,63,207,0.18)' : 'none',
       }}
-      onMouseEnter={(e) => {
-        if (!selected) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-      }}
+      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+      onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
     >
       <div
         className="flex items-center justify-center rounded-xl flex-shrink-0"
-        style={{
-          width: 38, height: 38,
-          background: selected ? 'rgba(75,63,207,0.3)' : 'rgba(255,255,255,0.05)',
-          fontSize: 16,
-        }}
+        style={{ width: 38, height: 38, background: selected ? 'rgba(75,63,207,0.3)' : 'rgba(255,255,255,0.05)', fontSize: 16 }}
       >
         🧱
       </div>
@@ -254,28 +248,31 @@ function InstanceCard({
         </p>
         <div className="flex items-center gap-2 mt-0.5">
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{instance.mc_version}</span>
-          <span style={{ fontSize: 10, color: loaderColor(instance.loader), fontWeight: 600 }}>
-            {instance.loader}
-          </span>
+          <span style={{ fontSize: 10, color: loaderColor(instance.loader), fontWeight: 600 }}>{instance.loader}</span>
           <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>{formatRam(instance.ram_mb)}</span>
         </div>
       </div>
 
-      <div onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+        {/* Star */}
+        <button
+          onClick={onToggleFavorite}
+          className="flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-150"
+          title={instance.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+          style={{ color: instance.favorite ? '#facc15' : 'rgba(255,255,255,0.2)', background: 'transparent' }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = instance.favorite ? '#fde047' : 'rgba(255,255,255,0.5)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = instance.favorite ? '#facc15' : 'rgba(255,255,255,0.2)' }}
+        >
+          <svg viewBox="0 0 24 24" fill={instance.favorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={instance.favorite ? 0 : 1.5} width={15} height={15}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+          </svg>
+        </button>
+
+        {/* Delete */}
         {confirm ? (
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => onDelete()}
-              style={{ fontSize: 11, fontWeight: 600, color: 'rgb(248,113,113)', background: 'rgba(200,50,50,0.15)', borderRadius: 8, padding: '4px 10px' }}
-            >
-              Supprimer
-            </button>
-            <button
-              onClick={() => setConfirm(false)}
-              style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: '4px 10px' }}
-            >
-              Annuler
-            </button>
+            <button onClick={() => onDelete()} style={{ fontSize: 11, fontWeight: 600, color: 'rgb(248,113,113)', background: 'rgba(200,50,50,0.15)', borderRadius: 8, padding: '4px 8px' }}>Supprimer</button>
+            <button onClick={() => setConfirm(false)} style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: '4px 8px' }}>Annuler</button>
           </div>
         ) : (
           <button
@@ -301,16 +298,19 @@ export default function Instances() {
   const navigate = useNavigate()
   const {
     versions, setVersions,
-    instances, setInstances, addInstance, removeInstance,
+    instances, setInstances, addInstance, updateInstance, removeInstance,
     selectedInstanceId, setSelectedInstanceId,
     ram,
   } = useStore()
 
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
+  const [othersExpanded, setOthersExpanded] = useState(true)
   const loaded = useRef(false)
 
   const selectedInstance = instances.find((i) => i.id === selectedInstanceId) ?? null
+  const favorites = instances.filter((i) => i.favorite)
+  const others = instances.filter((i) => !i.favorite)
 
   useEffect(() => {
     if (loaded.current) return
@@ -322,6 +322,7 @@ export default function Instances() {
     ]).then(([insts, vers]) => {
       setInstances(insts)
       if (vers) setVersions(vers)
+      if (insts.some((i) => i.favorite)) setOthersExpanded(false)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -333,6 +334,13 @@ export default function Instances() {
     try {
       await api.instances.delete(id)
       removeInstance(id)
+    } catch { /* ignore */ }
+  }
+
+  const handleToggleFavorite = async (id: string) => {
+    try {
+      const updated = await api.instances.toggleFavorite(id)
+      updateInstance(updated)
     } catch { /* ignore */ }
   }
 
@@ -372,7 +380,7 @@ export default function Instances() {
           }}
         >
           {/* Scrollable list */}
-          <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
+          <div className="flex flex-1 flex-col overflow-y-auto p-3">
             {loading ? (
               <div className="flex h-40 items-center justify-center">
                 <span className="h-7 w-7 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.08)', borderTopColor: 'rgba(75,63,207,0.8)' }} />
@@ -383,15 +391,62 @@ export default function Instances() {
                 <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>Aucune instance</p>
               </div>
             ) : (
-              instances.map((inst) => (
-                <InstanceCard
-                  key={inst.id}
-                  instance={inst}
-                  selected={inst.id === selectedInstanceId}
-                  onSelect={() => setSelectedInstanceId(inst.id)}
-                  onDelete={() => handleDelete(inst.id)}
-                />
-              ))
+              <>
+                {/* Favoris */}
+                {favorites.length > 0 && (
+                  <div className="mb-1">
+                    <p className="px-1 pb-1.5 text-xs font-semibold" style={{ color: '#facc15', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                      ★ Favoris
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {favorites.map((inst) => (
+                        <InstanceCard
+                          key={inst.id}
+                          instance={inst}
+                          selected={inst.id === selectedInstanceId}
+                          onSelect={() => setSelectedInstanceId(inst.id)}
+                          onToggleFavorite={() => handleToggleFavorite(inst.id)}
+                          onDelete={() => handleDelete(inst.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Autres */}
+                {others.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setOthersExpanded((v) => !v)}
+                      className="flex w-full items-center gap-1.5 px-1 pb-1.5"
+                    >
+                      <svg
+                        viewBox="0 0 24 24" fill="currentColor" width={10} height={10}
+                        style={{ color: 'rgba(255,255,255,0.3)', transition: 'transform 0.15s', transform: othersExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                      >
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                      <p className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                        Autres ({others.length})
+                      </p>
+                    </button>
+                    {othersExpanded && (
+                      <div className="flex flex-col gap-2">
+                        {others.map((inst) => (
+                          <InstanceCard
+                            key={inst.id}
+                            instance={inst}
+                            selected={inst.id === selectedInstanceId}
+                            onSelect={() => setSelectedInstanceId(inst.id)}
+                            onToggleFavorite={() => handleToggleFavorite(inst.id)}
+                            onDelete={() => handleDelete(inst.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
 

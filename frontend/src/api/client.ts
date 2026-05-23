@@ -33,6 +33,7 @@ export const api = {
     delete: (id: string) => invoke<void>('instance_delete', { id }),
     update: (id: string, name: string, mc_version: string, loader: string, ram_mb: number) =>
       invoke<Instance>('instance_update', { id, name, mcVersion: mc_version, loader, ramMb: ram_mb }),
+    toggleFavorite: (id: string) => invoke<Instance>('instance_toggle_favorite', { id }),
   },
 
   yuyu: {

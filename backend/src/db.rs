@@ -49,6 +49,12 @@ pub fn init_db(path: &Path) -> Result<Connection> {
          );",
     )?;
 
+    // Migration : ajout de la colonne favorite si elle n'existe pas encore
+    let _ = conn.execute(
+        "ALTER TABLE instances ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+
     Ok(conn)
 }
 
@@ -278,11 +284,12 @@ pub struct InstanceRow {
     pub mc_version: String,
     pub loader: String,
     pub ram_mb: u32,
+    pub favorite: bool,
 }
 
 pub fn instance_list(conn: &Connection) -> Result<Vec<InstanceRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, mc_version, loader, ram_mb FROM instances ORDER BY created_at ASC",
+        "SELECT id, name, mc_version, loader, ram_mb, favorite FROM instances ORDER BY created_at ASC",
     )?;
     let rows = stmt
         .query_map([], |r| {
@@ -292,6 +299,7 @@ pub fn instance_list(conn: &Connection) -> Result<Vec<InstanceRow>> {
                 mc_version: r.get(2)?,
                 loader: r.get(3)?,
                 ram_mb: r.get::<_, u32>(4)?,
+                favorite: r.get::<_, i64>(5)? != 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -300,7 +308,7 @@ pub fn instance_list(conn: &Connection) -> Result<Vec<InstanceRow>> {
 
 pub fn instance_get(conn: &Connection, id: &str) -> Result<Option<InstanceRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, mc_version, loader, ram_mb FROM instances WHERE id = ?1",
+        "SELECT id, name, mc_version, loader, ram_mb, favorite FROM instances WHERE id = ?1",
     )?;
     match stmt.query_row(params![id], |r| {
         Ok(InstanceRow {
@@ -309,12 +317,21 @@ pub fn instance_get(conn: &Connection, id: &str) -> Result<Option<InstanceRow>> 
             mc_version: r.get(2)?,
             loader: r.get(3)?,
             ram_mb: r.get::<_, u32>(4)?,
+            favorite: r.get::<_, i64>(5)? != 0,
         })
     }) {
         Ok(row) => Ok(Some(row)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+pub fn instance_set_favorite(conn: &Connection, id: &str, favorite: bool) -> Result<()> {
+    conn.execute(
+        "UPDATE instances SET favorite = ?1 WHERE id = ?2",
+        params![favorite as i64, id],
+    )?;
+    Ok(())
 }
 
 pub fn instance_insert(
