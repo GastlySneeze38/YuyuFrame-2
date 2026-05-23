@@ -9,16 +9,10 @@ pub fn init_db(path: &Path) -> Result<Connection> {
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
 
-         CREATE TABLE IF NOT EXISTS yuyu_users (
-             id            INTEGER PRIMARY KEY AUTOINCREMENT,
-             username      TEXT    UNIQUE NOT NULL,
-             password_hash TEXT    NOT NULL,
-             created_at    INTEGER NOT NULL
-         );
-
+         -- Sessions Minecraft (tokens stockés uniquement en local, jamais envoyés au serveur)
          CREATE TABLE IF NOT EXISTS mc_sessions (
              id               INTEGER PRIMARY KEY AUTOINCREMENT,
-             yuyu_user_id     INTEGER NOT NULL REFERENCES yuyu_users(id) ON DELETE CASCADE,
+             yuyu_user_id     INTEGER NOT NULL,
              mc_username      TEXT    NOT NULL,
              mc_uuid          TEXT    NOT NULL,
              access_token     TEXT    NOT NULL,
@@ -29,14 +23,17 @@ pub fn init_db(path: &Path) -> Result<Connection> {
          );
 
          CREATE TABLE IF NOT EXISTS active_mc (
-             yuyu_user_id INTEGER PRIMARY KEY REFERENCES yuyu_users(id) ON DELETE CASCADE,
+             yuyu_user_id INTEGER PRIMARY KEY,
              mc_uuid      TEXT    NOT NULL
          );
 
-         CREATE TABLE IF NOT EXISTS yuyu_tokens (
-             user_id    INTEGER PRIMARY KEY REFERENCES yuyu_users(id) ON DELETE CASCADE,
-             token      TEXT    NOT NULL,
-             created_at INTEGER NOT NULL
+         -- JWT YuyuFrame reçu du serveur (une seule ligne, pas de credentials Minecraft)
+         CREATE TABLE IF NOT EXISTS yuyu_session (
+             id        INTEGER PRIMARY KEY CHECK (id = 1),
+             jwt       TEXT    NOT NULL,
+             user_id   INTEGER NOT NULL,
+             username  TEXT    NOT NULL,
+             saved_at  INTEGER NOT NULL
          );
 
          CREATE TABLE IF NOT EXISTS instances (
@@ -49,7 +46,6 @@ pub fn init_db(path: &Path) -> Result<Connection> {
          );",
     )?;
 
-    // Migration : ajout de la colonne favorite si elle n'existe pas encore
     let _ = conn.execute(
         "ALTER TABLE instances ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
         [],
@@ -60,12 +56,6 @@ pub fn init_db(path: &Path) -> Result<Connection> {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-pub struct YuyuUser {
-    pub id: i64,
-    pub username: String,
-    pub password_hash: String,
-}
-
 #[derive(Clone)]
 pub struct McSessionRow {
     pub mc_username: String,
@@ -75,36 +65,40 @@ pub struct McSessionRow {
     pub expires_at: i64,
 }
 
-// ── YuyuFrame users ────────────────────────────────────────────────────────────
+// ── JWT session YuyuFrame (stocké localement pour restauration au démarrage) ──
 
-pub fn account_exists(conn: &Connection) -> Result<bool> {
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM yuyu_users", [], |r| r.get(0))?;
-    Ok(n > 0)
+pub struct YuyuSessionRow {
+    pub jwt: String,
+    pub user_id: i64,
+    pub username: String,
 }
 
-pub fn create_user(conn: &Connection, username: &str, password_hash: &str) -> Result<i64> {
+pub fn save_yuyu_jwt(conn: &Connection, user_id: i64, username: &str, jwt: &str) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "INSERT INTO yuyu_users (username, password_hash, created_at) VALUES (?1, ?2, ?3)",
-        params![username, password_hash, now],
+        "INSERT INTO yuyu_session (id, jwt, user_id, username, saved_at) VALUES (1, ?1, ?2, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET jwt=excluded.jwt, user_id=excluded.user_id,
+             username=excluded.username, saved_at=excluded.saved_at",
+        params![jwt, user_id, username, now],
     )?;
-    Ok(conn.last_insert_rowid())
+    Ok(())
 }
 
-pub fn get_user(conn: &Connection, username: &str) -> Result<Option<YuyuUser>> {
-    let mut stmt = conn
-        .prepare("SELECT id, username, password_hash FROM yuyu_users WHERE username = ?1")?;
-    match stmt.query_row(params![username], |r| {
-        Ok(YuyuUser {
-            id: r.get(0)?,
-            username: r.get(1)?,
-            password_hash: r.get(2)?,
-        })
-    }) {
-        Ok(u) => Ok(Some(u)),
+pub fn load_yuyu_jwt(conn: &Connection) -> Result<Option<YuyuSessionRow>> {
+    match conn.query_row(
+        "SELECT jwt, user_id, username FROM yuyu_session WHERE id = 1",
+        [],
+        |r| Ok(YuyuSessionRow { jwt: r.get(0)?, user_id: r.get(1)?, username: r.get(2)? }),
+    ) {
+        Ok(row) => Ok(Some(row)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+pub fn delete_yuyu_jwt(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM yuyu_session WHERE id = 1", [])?;
+    Ok(())
 }
 
 // ── Minecraft sessions ─────────────────────────────────────────────────────────
@@ -231,48 +225,6 @@ pub fn clear_active_mc(conn: &Connection, yuyu_user_id: i64, mc_uuid: &str) -> R
         "DELETE FROM active_mc WHERE yuyu_user_id = ?1 AND mc_uuid = ?2",
         params![yuyu_user_id, mc_uuid],
     )?;
-    Ok(())
-}
-
-// ── YuyuFrame session token ────────────────────────────────────────────────────
-
-pub struct YuyuTokenRow {
-    pub user_id: i64,
-    pub username: String,
-    pub token: String,
-}
-
-pub fn save_yuyu_token(conn: &Connection, user_id: i64, token: &str) -> Result<()> {
-    let now = chrono::Utc::now().timestamp();
-    conn.execute(
-        "INSERT INTO yuyu_tokens (user_id, token, created_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, created_at = excluded.created_at",
-        params![user_id, token, now],
-    )?;
-    Ok(())
-}
-
-pub fn load_yuyu_token(conn: &Connection) -> Result<Option<YuyuTokenRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT t.user_id, u.username, t.token
-         FROM yuyu_tokens t JOIN yuyu_users u ON u.id = t.user_id
-         LIMIT 1",
-    )?;
-    match stmt.query_row([], |r| {
-        Ok(YuyuTokenRow {
-            user_id: r.get(0)?,
-            username: r.get(1)?,
-            token: r.get(2)?,
-        })
-    }) {
-        Ok(row) => Ok(Some(row)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
-}
-
-pub fn delete_yuyu_token(conn: &Connection, user_id: i64) -> Result<()> {
-    conn.execute("DELETE FROM yuyu_tokens WHERE user_id = ?1", params![user_id])?;
     Ok(())
 }
 

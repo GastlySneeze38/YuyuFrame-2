@@ -1,6 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{db, state::SharedState};
+
+const API_BASE: &str = "http://localhost:3000";
+
+// ── Types retournés au frontend ───────────────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct StatusResp {
@@ -21,14 +25,21 @@ pub struct AccountInfo {
     pub is_active: bool,
 }
 
+// ── Réponse de la LauncherAPI ─────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ApiAuthResponse {
+    token: String,
+    user_id: i64,
+    username: String,
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn yuyu_status(state: tauri::State<'_, SharedState>) -> Result<StatusResp, String> {
     let s = state.read().await;
-    let conn = s.db.lock().await;
-    let has_account = db::account_exists(&conn).unwrap_or(false);
-    Ok(StatusResp { has_account })
+    Ok(StatusResp { has_account: s.yuyu_session.is_some() })
 }
 
 #[tauri::command]
@@ -37,42 +48,23 @@ pub async fn yuyu_register(
     username: String,
     password: String,
 ) -> Result<LoginResp, String> {
-    use argon2::{
-        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-        Argon2,
-    };
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{API_BASE}/auth/register"))
+        .json(&serde_json::json!({ "username": username, "password": password }))
+        .send()
+        .await
+        .map_err(|e| format!("Serveur inaccessible : {e}"))?;
 
-    if username.trim().is_empty() || password.len() < 4 {
-        return Err("Nom d'utilisateur ou mot de passe invalide".into());
+    if !resp.status().is_success() {
+        let msg = resp.text().await.unwrap_or_default();
+        return Err(msg);
     }
 
-    let (user_id, token) = {
-        let s = state.read().await;
-        let conn = s.db.lock().await;
+    let data: ApiAuthResponse = resp.json().await.map_err(|e| e.to_string())?;
+    save_session(&state, data.user_id, &data.username, &data.token).await?;
 
-        if db::account_exists(&conn).map_err(|e| e.to_string())? {
-            return Err("Un compte YuyuFrame existe déjà".into());
-        }
-
-        let salt = SaltString::generate(&mut OsRng);
-        let hash = Argon2::default()
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| e.to_string())?
-            .to_string();
-
-        let user_id = db::create_user(&conn, &username, &hash).map_err(|e| e.to_string())?;
-        let token = gen_token();
-        db::save_yuyu_token(&conn, user_id, &token).map_err(|e| e.to_string())?;
-        (user_id, token)
-    };
-
-    state.write().await.yuyu_session = Some(crate::state::YuyuSession {
-        user_id,
-        username: username.clone(),
-        token: token.clone(),
-    });
-
-    Ok(LoginResp { token, username, accounts: vec![] })
+    Ok(LoginResp { token: data.token, username: data.username, accounts: vec![] })
 }
 
 #[tauri::command]
@@ -81,26 +73,33 @@ pub async fn yuyu_login(
     username: String,
     password: String,
 ) -> Result<LoginResp, String> {
-    use argon2::{Argon2, PasswordHash, PasswordVerifier};
     use crate::minecraft::auth as mc_auth;
     use crate::state::MinecraftSession;
 
-    let (user_id, db_username, rows, active_uuid) = {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{API_BASE}/auth/login"))
+        .json(&serde_json::json!({ "username": username, "password": password }))
+        .send()
+        .await
+        .map_err(|e| format!("Serveur inaccessible : {e}"))?;
+
+    if !resp.status().is_success() {
+        let msg = resp.text().await.unwrap_or_default();
+        return Err(msg);
+    }
+
+    let data: ApiAuthResponse = resp.json().await.map_err(|e| e.to_string())?;
+    save_session(&state, data.user_id, &data.username, &data.token).await?;
+
+    // Charger les sessions Minecraft locales pour cet utilisateur
+    let (rows, active_uuid) = {
         let s = state.read().await;
         let conn = s.db.lock().await;
-
-        let user = db::get_user(&conn, &username)
-            .map_err(|e| e.to_string())?
-            .ok_or("Compte introuvable")?;
-
-        let hash = PasswordHash::new(&user.password_hash).map_err(|e| e.to_string())?;
-        Argon2::default()
-            .verify_password(password.as_bytes(), &hash)
-            .map_err(|_| "Mot de passe incorrect")?;
-
-        let rows = db::list_mc_sessions(&conn, user.id).map_err(|e| e.to_string())?;
-        let active_uuid = db::get_active_mc_uuid(&conn, user.id).map_err(|e| e.to_string())?;
-        (user.id, user.username, rows, active_uuid)
+        let rows = db::list_mc_sessions(&conn, data.user_id).map_err(|e| e.to_string())?;
+        let active_uuid =
+            db::get_active_mc_uuid(&conn, data.user_id).map_err(|e| e.to_string())?;
+        (rows, active_uuid)
     };
 
     let now = chrono::Utc::now().timestamp();
@@ -122,7 +121,10 @@ pub async fn yuyu_login(
                     Ok((mc_at, mc_user, mc_uuid, new_refresh, new_exp)) => {
                         let s = state.read().await;
                         let conn = s.db.lock().await;
-                        db::update_mc_tokens(&conn, user_id, &mc_uuid, &mc_at, &new_refresh, new_exp).ok();
+                        db::update_mc_tokens(
+                            &conn, data.user_id, &mc_uuid, &mc_at, &new_refresh, new_exp,
+                        )
+                        .ok();
                         drop(conn);
                         drop(s);
                         active_session = Some(MinecraftSession {
@@ -134,7 +136,7 @@ pub async fn yuyu_login(
                         });
                     }
                     Err(e) => {
-                        tracing::warn!("Échec du rafraîchissement: {}", e);
+                        tracing::warn!("Échec du rafraîchissement : {}", e);
                         active_session = Some(MinecraftSession {
                             username: row.mc_username.clone(),
                             uuid: row.mc_uuid.clone(),
@@ -156,35 +158,17 @@ pub async fn yuyu_login(
         }
     }
 
-    let token = gen_token();
-    {
-        let s = state.read().await;
-        let conn = s.db.lock().await;
-        db::save_yuyu_token(&conn, user_id, &token).map_err(|e| e.to_string())?;
-    }
-    {
-        let mut w = state.write().await;
-        w.yuyu_session = Some(crate::state::YuyuSession {
-            user_id,
-            username: db_username.clone(),
-            token: token.clone(),
-        });
-        w.session = active_session;
-    }
+    state.write().await.session = active_session;
 
-    Ok(LoginResp { token, username: db_username, accounts })
+    Ok(LoginResp { token: data.token, username: data.username, accounts })
 }
 
 #[tauri::command]
 pub async fn yuyu_logout(state: tauri::State<'_, SharedState>) -> Result<(), String> {
-    let user_id = {
-        let w = state.read().await;
-        w.yuyu_session.as_ref().map(|s| s.user_id)
-    };
-    if let Some(uid) = user_id {
+    {
         let s = state.read().await;
         let conn = s.db.lock().await;
-        db::delete_yuyu_token(&conn, uid).ok();
+        db::delete_yuyu_jwt(&conn).ok();
     }
     let mut w = state.write().await;
     w.yuyu_session = None;
@@ -194,11 +178,21 @@ pub async fn yuyu_logout(state: tauri::State<'_, SharedState>) -> Result<(), Str
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
-fn gen_token() -> String {
-    use rand::Rng;
-    rand::thread_rng()
-        .sample_iter(rand::distributions::Alphanumeric)
-        .take(48)
-        .map(char::from)
-        .collect()
+async fn save_session(
+    state: &tauri::State<'_, SharedState>,
+    user_id: i64,
+    username: &str,
+    jwt: &str,
+) -> Result<(), String> {
+    {
+        let s = state.read().await;
+        let conn = s.db.lock().await;
+        db::save_yuyu_jwt(&conn, user_id, username, jwt).map_err(|e| e.to_string())?;
+    }
+    state.write().await.yuyu_session = Some(crate::state::YuyuSession {
+        user_id,
+        username: username.to_string(),
+        token: jwt.to_string(),
+    });
+    Ok(())
 }

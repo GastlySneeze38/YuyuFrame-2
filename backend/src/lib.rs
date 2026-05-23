@@ -27,7 +27,7 @@ pub fn run() {
             let conn = db::init_db(&db_path).expect("Impossible d'initialiser la base de données");
             tracing::info!("Base de données : {}", db_path.display());
 
-            let yuyu_session = db::load_yuyu_token(&conn)
+            let yuyu_session = db::load_yuyu_jwt(&conn)
                 .ok()
                 .flatten()
                 .map(|row| {
@@ -35,7 +35,7 @@ pub fn run() {
                     state::YuyuSession {
                         user_id: row.user_id,
                         username: row.username,
-                        token: row.token,
+                        token: row.jwt,
                     }
                 });
 

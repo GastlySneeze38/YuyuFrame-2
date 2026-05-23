@@ -53,6 +53,7 @@ target/
 yuyu.db-shm
 yuyu.db-wal
 yuyu.db
+launcher.db
 
 # ── YuyuFrame data ──
 session.json

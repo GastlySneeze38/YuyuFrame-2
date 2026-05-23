@@ -1,7 +1,10 @@
+mod auth;
 mod health;
 
 use axum::Router;
 
-pub fn router() -> Router {
-    Router::new().merge(health::router())
+use crate::state::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new().merge(health::router()).merge(auth::router())
 }
