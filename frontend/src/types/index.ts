@@ -53,3 +53,13 @@ export interface Account {
   username: string
   uuid: string
 }
+
+export interface SyncInstance {
+  id: number
+  instance_name: string
+  mc_version: string
+  loader: string
+  ram_mb: number
+  has_data: boolean
+  updated_at: number
+}

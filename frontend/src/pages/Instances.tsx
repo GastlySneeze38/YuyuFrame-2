@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
-import type { Instance, Loader } from '@/types'
+import type { Instance, Loader, SyncInstance } from '@/types'
 import { ModsContent } from '@/pages/Mods'
 
 const LOADERS: Loader[] = ['vanilla', 'fabric', 'forge']
@@ -292,6 +292,319 @@ function InstanceCard({
   )
 }
 
+// ── Sync panel ────────────────────────────────────────────────────────────────
+
+function formatDate(ts: number) {
+  return new Date(ts * 1000).toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function SyncPanel({ instance, isLoggedIn }: { instance: Instance; isLoggedIn: boolean }) {
+  const [cloudInstances, setCloudInstances] = useState<SyncInstance[]>([])
+  const [loading, setLoading] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const [pullingId, setPullingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const loaded = useRef(false)
+
+  const cloudForThisInstance = cloudInstances.find(
+    (ci) => ci.instance_name === instance.name,
+  )
+
+  useEffect(() => {
+    loaded.current = false
+  }, [instance.id])
+
+  useEffect(() => {
+    if (!isLoggedIn || loaded.current) return
+    loaded.current = true
+    setLoading(true)
+    api.sync.list()
+      .then(setCloudInstances)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
+  }, [instance.id, isLoggedIn])
+
+  const notify = (msg: string) => {
+    setSuccess(msg)
+    setTimeout(() => setSuccess(''), 3000)
+  }
+
+  const handlePush = async () => {
+    setPushing(true)
+    setError('')
+    try {
+      const updated = await api.sync.push(instance.id)
+      setCloudInstances((prev) => {
+        const idx = prev.findIndex((ci) => ci.id === updated.id)
+        return idx >= 0 ? prev.map((ci, i) => (i === idx ? updated : ci)) : [updated, ...prev]
+      })
+      notify('Synchronisé vers le cloud !')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPushing(false)
+    }
+  }
+
+  const handlePull = async (syncId: number) => {
+    setPullingId(syncId)
+    setError('')
+    try {
+      await api.sync.pull(syncId, instance.id)
+      notify('Données tirées depuis le cloud !')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPullingId(null)
+    }
+  }
+
+  const handleDelete = async (syncId: number) => {
+    setDeletingId(syncId)
+    setError('')
+    try {
+      await api.sync.delete(syncId)
+      setCloudInstances((prev) => prev.filter((ci) => ci.id !== syncId))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6">
+        <div style={{ fontSize: 28, opacity: 0.35 }}>🔒</div>
+        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', fontWeight: 600, textAlign: 'center' }}>
+          Connecte-toi à YuyuFrame<br />pour accéder à la synchronisation
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-y-auto p-4 gap-4">
+      {/* Push section */}
+      <div
+        className="rounded-2xl p-4 flex flex-col gap-3"
+        style={{ background: 'rgba(75,63,207,0.08)', border: '1px solid rgba(75,63,207,0.2)' }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-bold text-white" style={{ fontSize: 13 }}>Cette instance</p>
+            {cloudForThisInstance ? (
+              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+                Dernière sync : {formatDate(cloudForThisInstance.updated_at)}
+              </p>
+            ) : (
+              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', marginTop: 2 }}>
+                Pas encore synchronisée
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handlePush}
+            disabled={pushing}
+            className="flex items-center gap-2 font-semibold text-white transition-all duration-150 active:scale-95"
+            style={{
+              height: 34, padding: '0 14px', borderRadius: 10, fontSize: 12,
+              background: pushing ? 'rgba(40,38,65,0.7)' : '#4B3FCF',
+              boxShadow: pushing ? 'none' : '0 4px 16px rgba(75,63,207,0.3)',
+              cursor: pushing ? 'not-allowed' : 'pointer',
+            }}
+            onMouseEnter={(e) => { if (!pushing) e.currentTarget.style.background = '#6155e8' }}
+            onMouseLeave={(e) => { if (!pushing) e.currentTarget.style.background = '#4B3FCF' }}
+          >
+            {pushing ? (
+              <span className="h-3 w-3 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'white' }} />
+            ) : (
+              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
+                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+              </svg>
+            )}
+            {pushing ? 'Envoi...' : 'Pousser'}
+          </button>
+        </div>
+      </div>
+
+      {/* Feedback */}
+      {success && (
+        <p style={{ fontSize: 12, color: 'rgb(74,222,128)', fontWeight: 600, textAlign: 'center' }}>
+          {success}
+        </p>
+      )}
+      {error && (
+        <p style={{ fontSize: 12, color: 'rgb(248,113,113)' }}>{error}</p>
+      )}
+
+      {/* Cloud list */}
+      <div>
+        <p className="font-semibold mb-2" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          Cloud
+        </p>
+
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <span className="h-6 w-6 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.08)', borderTopColor: 'rgba(75,63,207,0.8)' }} />
+          </div>
+        ) : cloudInstances.length === 0 ? (
+          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.2)', textAlign: 'center', paddingTop: 16 }}>
+            Aucune instance synchronisée
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {cloudInstances.map((ci) => {
+              const isCurrent = ci.instance_name === instance.name
+              const isPulling = pullingId === ci.id
+              const isDeleting = deletingId === ci.id
+              return (
+                <div
+                  key={ci.id}
+                  className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                  style={{
+                    background: isCurrent ? 'rgba(75,63,207,0.12)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${isCurrent ? 'rgba(75,63,207,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                  }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold truncate" style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)' }}>
+                        {ci.instance_name}
+                      </p>
+                      {isCurrent && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#818cf8', background: 'rgba(75,63,207,0.2)', padding: '1px 6px', borderRadius: 4, letterSpacing: '0.05em' }}>
+                          ACTUELLE
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>{ci.mc_version}</span>
+                      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>{ci.loader}</span>
+                      {ci.has_data && (
+                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>{formatDate(ci.updated_at)}</span>
+                      )}
+                      {!ci.has_data && (
+                        <span style={{ fontSize: 10, color: 'rgba(255,180,0,0.5)' }}>Pas de données</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    {/* Pull */}
+                    <button
+                      onClick={() => handlePull(ci.id)}
+                      disabled={isPulling || !ci.has_data}
+                      title={ci.has_data ? `Tirer "${ci.instance_name}" dans cette instance` : 'Aucune donnée à tirer'}
+                      className="flex items-center gap-1.5 font-semibold transition-all duration-150"
+                      style={{
+                        height: 28, padding: '0 10px', borderRadius: 8, fontSize: 11,
+                        background: isPulling ? 'rgba(40,38,65,0.7)' : 'rgba(75,63,207,0.2)',
+                        color: ci.has_data ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
+                        cursor: (isPulling || !ci.has_data) ? 'not-allowed' : 'pointer',
+                        border: '1px solid rgba(75,63,207,0.25)',
+                      }}
+                      onMouseEnter={(e) => { if (ci.has_data && !isPulling) e.currentTarget.style.background = 'rgba(75,63,207,0.35)' }}
+                      onMouseLeave={(e) => { if (ci.has_data && !isPulling) e.currentTarget.style.background = 'rgba(75,63,207,0.2)' }}
+                    >
+                      {isPulling ? (
+                        <span className="h-3 w-3 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'white' }} />
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="currentColor" width={11} height={11}>
+                          <path d="M5 15H9v3h10V6H9v3H5v6zm4-4v-2h8v6H9v-2H7v-2h2z" />
+                        </svg>
+                      )}
+                      Tirer
+                    </button>
+
+                    {/* Delete */}
+                    <button
+                      onClick={() => handleDelete(ci.id)}
+                      disabled={isDeleting}
+                      title="Supprimer ce sync"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-150"
+                      style={{ color: 'rgba(255,255,255,0.2)', background: 'transparent', cursor: isDeleting ? 'not-allowed' : 'pointer' }}
+                      onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.color = 'rgb(248,113,113)'; e.currentTarget.style.background = 'rgba(200,50,50,0.12)' } }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.2)'; e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="currentColor" width={14} height={14}>
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.15)', textAlign: 'center', marginTop: 4 }}>
+        Configs + 3 saves max synchronisés
+      </p>
+    </div>
+  )
+}
+
+// ── Right panel with tabs ──────────────────────────────────────────────────────
+
+type RightTab = 'mods' | 'sync'
+
+function RightPanel({ instance, isLoggedIn }: { instance: Instance; isLoggedIn: boolean }) {
+  const [tab, setTab] = useState<RightTab>('mods')
+
+  useEffect(() => {
+    setTab('mods')
+  }, [instance.id])
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Tab bar */}
+      <div
+        className="flex flex-shrink-0 items-center gap-1 px-3 pt-2 pb-0"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+      >
+        {(['mods', 'sync'] as RightTab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className="font-semibold transition-all duration-150"
+            style={{
+              fontSize: 12,
+              padding: '6px 14px',
+              borderRadius: '8px 8px 0 0',
+              background: 'transparent',
+              color: tab === t ? 'white' : 'rgba(255,255,255,0.35)',
+              borderBottom: tab === t ? '2px solid #4B3FCF' : '2px solid transparent',
+            }}
+          >
+            {t === 'mods' ? 'Mods' : 'Sync'}
+            {t === 'sync' && (
+              <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, color: '#818cf8', background: 'rgba(75,63,207,0.2)', padding: '1px 5px', borderRadius: 4 }}>
+                PREMIUM
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {tab === 'mods' ? (
+          <ModsContent instance={instance} />
+        ) : (
+          <SyncPanel instance={instance} isLoggedIn={isLoggedIn} />
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Instances() {
@@ -301,6 +614,7 @@ export default function Instances() {
     instances, setInstances, addInstance, updateInstance, removeInstance,
     selectedInstanceId, setSelectedInstanceId,
     defaultRam,
+    yuyuToken,
   } = useStore()
 
   const [loading, setLoading] = useState(true)
@@ -471,10 +785,10 @@ export default function Instances() {
           </div>
         </div>
 
-        {/* Right panel — mods */}
+        {/* Right panel — mods / sync */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {selectedInstance ? (
-            <ModsContent instance={selectedInstance} />
+            <RightPanel instance={selectedInstance} isLoggedIn={yuyuToken !== null} />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3">
               <div style={{ fontSize: 32, opacity: 0.4 }}>←</div>
