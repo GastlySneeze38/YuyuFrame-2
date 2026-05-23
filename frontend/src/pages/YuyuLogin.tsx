@@ -210,6 +210,20 @@ export default function YuyuLogin() {
           </form>
         </div>
 
+        {/* Toggle login / register */}
+        <div className="flex items-center justify-center gap-1.5">
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+            {isRegister ? 'Déjà un compte ?' : 'Pas encore de compte ?'}
+          </span>
+          <button
+            type="button"
+            onClick={() => { setMode(isRegister ? 'login' : 'register'); setError(''); setConfirm('') }}
+            style={{ fontSize: 11, color: '#7B6EE8', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            {isRegister ? 'Se connecter' : 'Créer un compte'}
+          </button>
+        </div>
+
         {/* Lock icon + security note */}
         <div className="flex items-center justify-center gap-2">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 13, height: 13, color: 'rgba(255,255,255,0.18)' }}>
