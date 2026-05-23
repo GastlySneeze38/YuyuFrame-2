@@ -34,7 +34,12 @@ struct ApiAuthResponse {
     token: String,
     user_id: i64,
     username: String,
+    #[serde(default = "default_plan")]
+    plan: String,
+    plan_expires_at: Option<i64>,
 }
+
+fn default_plan() -> String { "free".into() }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +69,7 @@ pub async fn yuyu_register(
     }
 
     let data: ApiAuthResponse = resp.json().await.map_err(|e| e.to_string())?;
-    save_session(&state, data.user_id, &data.username, &data.token).await?;
+    save_session(&state, data.user_id, &data.username, &data.token, &data.plan, data.plan_expires_at).await?;
 
     Ok(LoginResp { token: data.token, username: data.username, accounts: vec![] })
 }
@@ -92,7 +97,7 @@ pub async fn yuyu_login(
     }
 
     let data: ApiAuthResponse = resp.json().await.map_err(|e| e.to_string())?;
-    save_session(&state, data.user_id, &data.username, &data.token).await?;
+    save_session(&state, data.user_id, &data.username, &data.token, &data.plan, data.plan_expires_at).await?;
 
     // Charger les sessions Minecraft locales pour cet utilisateur
     let (rows, active_uuid) = {
@@ -185,11 +190,14 @@ async fn save_session(
     user_id: i64,
     username: &str,
     jwt: &str,
+    plan: &str,
+    plan_expires_at: Option<i64>,
 ) -> Result<(), String> {
     {
         let s = state.read().await;
         let conn = s.db.lock().await;
-        db::save_yuyu_jwt(&conn, user_id, username, jwt).map_err(|e| e.to_string())?;
+        db::save_yuyu_jwt(&conn, user_id, username, jwt, plan, plan_expires_at)
+            .map_err(|e| e.to_string())?;
         // Adopte les instances créées avant la connexion (yuyu_user_id = 0)
         db::instance_claim_unclaimed(&conn, user_id).ok();
     }
@@ -197,6 +205,8 @@ async fn save_session(
         user_id,
         username: username.to_string(),
         token: jwt.to_string(),
+        plan: plan.to_string(),
+        plan_expires_at,
     });
     Ok(())
 }

@@ -2,12 +2,17 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Instance, Version, Account } from '@/types'
 
+export type YuyuPlan = 'free' | 'premium' | 'ultimate'
+
 interface Store {
   // ── YuyuFrame session (NOT persisted — requires password on each start) ──
   yuyuToken: string | null
   yuyuUsername: string | null
-  setYuyuSession: (token: string, username: string) => void
+  yuyuPlan: YuyuPlan
+  yuyuPlanExpiresAt: number | null
+  setYuyuSession: (token: string, username: string, plan: YuyuPlan, planExpiresAt: number | null) => void
   clearYuyuSession: () => void
+  isPremium: () => boolean
 
   // ── Active Minecraft account ───────────────────────────────────────────────
   username: string | null
@@ -62,9 +67,18 @@ export const useStore = create<Store>()(
       // YuyuFrame session
       yuyuToken: null,
       yuyuUsername: null,
-      setYuyuSession: (token, username) => set({ yuyuToken: token, yuyuUsername: username }),
+      yuyuPlan: 'free',
+      yuyuPlanExpiresAt: null,
+      setYuyuSession: (token, username, plan, planExpiresAt) =>
+        set({ yuyuToken: token, yuyuUsername: username, yuyuPlan: plan, yuyuPlanExpiresAt: planExpiresAt }),
       clearYuyuSession: () =>
-        set({ yuyuToken: null, yuyuUsername: null, accounts: [], username: null, uuid: null }),
+        set({ yuyuToken: null, yuyuUsername: null, yuyuPlan: 'free', yuyuPlanExpiresAt: null, accounts: [], username: null, uuid: null }),
+      isPremium: () => {
+        const { yuyuPlan, yuyuPlanExpiresAt } = get()
+        const active = yuyuPlan === 'premium' || yuyuPlan === 'ultimate'
+        const notExpired = yuyuPlanExpiresAt === null || yuyuPlanExpiresAt > Date.now() / 1000
+        return active && notExpired
+      },
 
       // Active MC account
       username: null,

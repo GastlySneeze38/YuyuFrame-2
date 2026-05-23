@@ -27,11 +27,13 @@ pub fn init_db(path: &Path) -> Result<Connection> {
          );
 
          CREATE TABLE IF NOT EXISTS yuyu_session (
-             id        INTEGER PRIMARY KEY CHECK (id = 1),
-             jwt       TEXT    NOT NULL,
-             user_id   INTEGER NOT NULL,
-             username  TEXT    NOT NULL,
-             saved_at  INTEGER NOT NULL
+             id              INTEGER PRIMARY KEY CHECK (id = 1),
+             jwt             TEXT    NOT NULL,
+             user_id         INTEGER NOT NULL,
+             username        TEXT    NOT NULL,
+             plan            TEXT    NOT NULL DEFAULT 'free',
+             plan_expires_at INTEGER,
+             saved_at        INTEGER NOT NULL
          );
 
          CREATE TABLE IF NOT EXISTS instances (
@@ -48,6 +50,8 @@ pub fn init_db(path: &Path) -> Result<Connection> {
 
     // Migrations pour les DBs existantes
     let _ = conn.execute("ALTER TABLE instances ADD COLUMN yuyu_user_id INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE yuyu_session ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'", []);
+    let _ = conn.execute("ALTER TABLE yuyu_session ADD COLUMN plan_expires_at INTEGER", []);
     let _ = conn.execute("ALTER TABLE instances ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0", []);
 
     Ok(conn)
@@ -70,24 +74,45 @@ pub struct YuyuSessionRow {
     pub jwt: String,
     pub user_id: i64,
     pub username: String,
+    pub plan: String,
+    pub plan_expires_at: Option<i64>,
 }
 
-pub fn save_yuyu_jwt(conn: &Connection, user_id: i64, username: &str, jwt: &str) -> Result<()> {
+pub fn save_yuyu_jwt(
+    conn: &Connection,
+    user_id: i64,
+    username: &str,
+    jwt: &str,
+    plan: &str,
+    plan_expires_at: Option<i64>,
+) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "INSERT INTO yuyu_session (id, jwt, user_id, username, saved_at) VALUES (1, ?1, ?2, ?3, ?4)
-         ON CONFLICT(id) DO UPDATE SET jwt=excluded.jwt, user_id=excluded.user_id,
-             username=excluded.username, saved_at=excluded.saved_at",
-        params![jwt, user_id, username, now],
+        "INSERT INTO yuyu_session (id, jwt, user_id, username, plan, plan_expires_at, saved_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET
+             jwt             = excluded.jwt,
+             user_id         = excluded.user_id,
+             username        = excluded.username,
+             plan            = excluded.plan,
+             plan_expires_at = excluded.plan_expires_at,
+             saved_at        = excluded.saved_at",
+        params![jwt, user_id, username, plan, plan_expires_at, now],
     )?;
     Ok(())
 }
 
 pub fn load_yuyu_jwt(conn: &Connection) -> Result<Option<YuyuSessionRow>> {
     match conn.query_row(
-        "SELECT jwt, user_id, username FROM yuyu_session WHERE id = 1",
+        "SELECT jwt, user_id, username, plan, plan_expires_at FROM yuyu_session WHERE id = 1",
         [],
-        |r| Ok(YuyuSessionRow { jwt: r.get(0)?, user_id: r.get(1)?, username: r.get(2)? }),
+        |r| Ok(YuyuSessionRow {
+            jwt: r.get(0)?,
+            user_id: r.get(1)?,
+            username: r.get(2)?,
+            plan: r.get::<_, String>(3).unwrap_or_else(|_| "free".into()),
+            plan_expires_at: r.get(4)?,
+        }),
     ) {
         Ok(row) => Ok(Some(row)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

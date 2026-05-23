@@ -10,6 +10,8 @@ export interface YuyuStatusResp {
 export interface YuyuLoginResp {
   token: string
   username: string
+  plan: string
+  plan_expires_at: number | null
   accounts: McAccountInfo[]
 }
 

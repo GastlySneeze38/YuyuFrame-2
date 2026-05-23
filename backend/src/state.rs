@@ -20,6 +20,19 @@ pub struct YuyuSession {
     pub user_id: i64,
     pub username: String,
     pub token: String,
+    pub plan: String,
+    pub plan_expires_at: Option<i64>,
+}
+
+impl YuyuSession {
+    pub fn is_premium(&self) -> bool {
+        let active = self.plan == "premium" || self.plan == "ultimate";
+        let not_expired = self
+            .plan_expires_at
+            .map(|exp| exp > chrono::Utc::now().timestamp())
+            .unwrap_or(true);
+        active && not_expired
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

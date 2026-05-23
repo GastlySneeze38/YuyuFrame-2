@@ -38,6 +38,8 @@ pub fn run() {
                         user_id: row.user_id,
                         username: row.username,
                         token: row.jwt,
+                        plan: row.plan,
+                        plan_expires_at: row.plan_expires_at,
                     }
                 });
 

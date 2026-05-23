@@ -111,7 +111,8 @@ function SaveToggle({
 // ── Instances sync card ───────────────────────────────────────────────────────
 
 function InstancesSyncCard() {
-  const { instances, yuyuToken } = useStore()
+  const { instances, yuyuToken, isPremium } = useStore()
+  const userIsPremium = isPremium()
 
   const [cloudInstances, setCloudInstances] = useState<SyncInstance[]>([])
   const [cloudLoading, setCloudLoading] = useState(false)
@@ -277,6 +278,28 @@ function InstancesSyncCard() {
         <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>
           Connecte-toi à YuyuFrame<br />pour synchroniser tes instances
         </p>
+      </div>
+    )
+  }
+
+  if (!userIsPremium) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-10">
+        <div style={{ fontSize: 32, opacity: 0.35 }}>⭐</div>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', fontWeight: 700 }}>
+            Fonctionnalité Premium
+          </p>
+          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
+            La synchronisation multi-PC est réservée<br />aux abonnés Premium et Ultimate.
+          </p>
+        </div>
+        <div
+          className="rounded-xl px-4 py-2"
+          style={{ background: 'rgba(75,63,207,0.15)', border: '1px solid rgba(75,63,207,0.3)', fontSize: 12, color: '#818cf8', fontWeight: 600 }}
+        >
+          7.99 € / mois — Passer à Premium
+        </div>
       </div>
     )
   }

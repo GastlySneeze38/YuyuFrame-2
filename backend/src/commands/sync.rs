@@ -37,7 +37,7 @@ pub struct SyncProgressEvent {
     pub label: String,
 }
 
-// ── Auth helper ────────────────────────────────────────────────────────────────
+// ── Auth helpers ───────────────────────────────────────────────────────────────
 
 fn get_token(state: &crate::state::AppState) -> Result<String, String> {
     state
@@ -45,6 +45,17 @@ fn get_token(state: &crate::state::AppState) -> Result<String, String> {
         .as_ref()
         .map(|s| s.token.clone())
         .ok_or_else(|| "Non connecté à YuyuFrame".into())
+}
+
+fn require_premium(state: &crate::state::AppState) -> Result<(), String> {
+    let session = state
+        .yuyu_session
+        .as_ref()
+        .ok_or_else(|| String::from("Non connecté à YuyuFrame"))?;
+    if !session.is_premium() {
+        return Err(String::from("Abonnement Premium requis pour la synchronisation"));
+    }
+    Ok(())
 }
 
 // ── Save listing ───────────────────────────────────────────────────────────────
@@ -215,6 +226,7 @@ pub async fn sync_list_instances(
 ) -> Result<Vec<SyncInstance>, String> {
     let token = {
         let s = state.read().await;
+        require_premium(&s)?;
         get_token(&s)?
     };
 
@@ -244,6 +256,7 @@ pub async fn sync_push_instance(
 
     let (token, instance) = {
         let s = state.read().await;
+        require_premium(&s)?;
         let token = get_token(&s)?;
         let user_id = s.yuyu_session.as_ref().map(|y| y.user_id).unwrap_or(0);
         let conn = s.db.lock().await;
@@ -332,6 +345,7 @@ pub async fn sync_pull_instance(
 ) -> Result<(), String> {
     let token = {
         let s = state.read().await;
+        require_premium(&s)?;
         get_token(&s)?
     };
 
@@ -362,6 +376,7 @@ pub async fn sync_delete_instance(
 ) -> Result<(), String> {
     let token = {
         let s = state.read().await;
+        require_premium(&s)?;
         get_token(&s)?
     };
 

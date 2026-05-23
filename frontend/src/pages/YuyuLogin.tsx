@@ -43,7 +43,12 @@ export default function YuyuLogin() {
         : await api.yuyu.login(username, password)
 
       // Store token in-memory (NOT in localStorage)
-      setYuyuSession(resp.token, resp.username)
+      setYuyuSession(
+        resp.token,
+        resp.username,
+        (resp.plan ?? 'free') as import('@/stores/useStore').YuyuPlan,
+        resp.plan_expires_at ?? null,
+      )
 
       // Populate MC accounts from backend response
       const accs: Account[] = resp.accounts.map((a) => ({
