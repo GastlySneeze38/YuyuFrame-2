@@ -19,12 +19,16 @@ pub struct AuthResponse {
     token: String,
     user_id: i64,
     username: String,
+    plan: String,
+    plan_expires_at: Option<i64>,
 }
 
 #[derive(Serialize)]
 pub struct MeResponse {
     user_id: i64,
     username: String,
+    plan: String,
+    plan_expires_at: Option<i64>,
 }
 
 type ApiError = (StatusCode, String);
@@ -70,7 +74,13 @@ async fn register(
     let token = jwt::encode_jwt(user_id, &body.username, &state.jwt_secret)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(AuthResponse { token, user_id, username: body.username }))
+    Ok(Json(AuthResponse {
+        token,
+        user_id,
+        username: body.username,
+        plan: "free".into(),
+        plan_expires_at: None,
+    }))
 }
 
 async fn login(
@@ -94,7 +104,13 @@ async fn login(
     let token = jwt::encode_jwt(user.id, &user.username, &state.jwt_secret)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(AuthResponse { token, user_id: user.id, username: user.username }))
+    Ok(Json(AuthResponse {
+        token,
+        user_id: user.id,
+        username: user.username.clone(),
+        plan: user.plan,
+        plan_expires_at: user.plan_expires_at,
+    }))
 }
 
 async fn me(
@@ -110,5 +126,15 @@ async fn me(
     let claims = jwt::decode_jwt(token, &state.jwt_secret)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Token invalide ou expiré".into()))?;
 
-    Ok(Json(MeResponse { user_id: claims.sub, username: claims.username }))
+    let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let user = db::get_user_by_id(&conn, claims.sub)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Utilisateur introuvable".into()))?;
+
+    Ok(Json(MeResponse {
+        user_id: claims.sub,
+        username: claims.username,
+        plan: user.plan,
+        plan_expires_at: user.plan_expires_at,
+    }))
 }

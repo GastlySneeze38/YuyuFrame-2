@@ -58,6 +58,19 @@ fn extract_user_id(headers: &HeaderMap, jwt_secret: &str) -> Result<i64, ApiErro
     Ok(claims.sub)
 }
 
+/// Vérifie dans la DB que l'utilisateur a un plan premium ou ultimate actif.
+fn require_premium(conn: &rusqlite::Connection, user_id: i64) -> Result<(), ApiError> {
+    let is_premium = db::check_premium(conn, user_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !is_premium {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            "Abonnement Premium requis pour cette fonctionnalité".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn row_to_resp(row: db::SyncInstanceRow) -> SyncInstanceResp {
     SyncInstanceResp {
         id: row.id,
@@ -77,6 +90,7 @@ async fn list_instances(
 ) -> Result<Json<Vec<SyncInstanceResp>>, ApiError> {
     let user_id = extract_user_id(&headers, &state.jwt_secret)?;
     let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    require_premium(&conn, user_id)?;
     let instances = db::sync_list(&conn, user_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(instances.into_iter().map(row_to_resp).collect()))
@@ -89,6 +103,7 @@ async fn upsert_instance(
 ) -> Result<Json<SyncInstanceResp>, ApiError> {
     let user_id = extract_user_id(&headers, &state.jwt_secret)?;
     let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    require_premium(&conn, user_id)?;
 
     let existing = db::sync_get_by_name(&conn, user_id, &body.instance_name)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -157,6 +172,7 @@ async fn delete_instance(
 ) -> Result<StatusCode, ApiError> {
     let user_id = extract_user_id(&headers, &state.jwt_secret)?;
     let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    require_premium(&conn, user_id)?;
     let row = db::sync_get(&conn, id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Instance sync introuvable".into()))?;
@@ -176,6 +192,7 @@ async fn push_data(
 ) -> Result<Json<SyncInstanceResp>, ApiError> {
     let user_id = extract_user_id(&headers, &state.jwt_secret)?;
     let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    require_premium(&conn, user_id)?;
     let row = db::sync_get(&conn, id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Instance sync introuvable".into()))?;
@@ -197,6 +214,7 @@ async fn pull_data(
 ) -> Result<Response, ApiError> {
     let user_id = extract_user_id(&headers, &state.jwt_secret)?;
     let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    require_premium(&conn, user_id)?;
     let row = db::sync_get(&conn, id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Instance sync introuvable".into()))?;

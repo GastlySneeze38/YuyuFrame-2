@@ -29,10 +29,13 @@ async fn main() {
 
     let jwt_secret = std::env::var("JWT_SECRET")
         .unwrap_or_else(|_| "changeme-set-JWT_SECRET-in-prod".into());
+    let admin_secret = std::env::var("ADMIN_SECRET")
+        .unwrap_or_else(|_| "changeme-set-ADMIN_SECRET-in-prod".into());
 
     let app_state = AppState {
         db: Arc::new(Mutex::new(conn)),
         jwt_secret,
+        admin_secret,
     };
 
     let app = Router::new()

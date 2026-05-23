@@ -1,3 +1,4 @@
+mod admin;
 mod auth;
 mod health;
 mod sync;
@@ -11,4 +12,5 @@ pub fn router() -> Router<AppState> {
         .merge(health::router())
         .merge(auth::router())
         .merge(sync::router())
+        .merge(admin::router())
 }

@@ -2,18 +2,20 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 
 pub fn init(conn: &Connection) -> Result<()> {
-    // Migration: add save_count if missing (existing DBs)
-    let _ = conn.execute(
-        "ALTER TABLE sync_instances ADD COLUMN save_count INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
+    // Migrations pour les DBs existantes
+    let _ = conn.execute("ALTER TABLE sync_instances ADD COLUMN save_count INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'", []);
+    let _ = conn.execute("ALTER TABLE users ADD COLUMN plan_expires_at INTEGER", []);
+
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          CREATE TABLE IF NOT EXISTS users (
-             id            INTEGER PRIMARY KEY AUTOINCREMENT,
-             username      TEXT    UNIQUE NOT NULL,
-             password_hash TEXT    NOT NULL,
-             created_at    INTEGER NOT NULL
+             id              INTEGER PRIMARY KEY AUTOINCREMENT,
+             username        TEXT    UNIQUE NOT NULL,
+             password_hash   TEXT    NOT NULL,
+             plan            TEXT    NOT NULL DEFAULT 'free',
+             plan_expires_at INTEGER,
+             created_at      INTEGER NOT NULL
          );
          CREATE TABLE IF NOT EXISTS sync_instances (
              id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +41,8 @@ pub struct User {
     pub id: i64,
     pub username: String,
     pub password_hash: String,
+    pub plan: String,
+    pub plan_expires_at: Option<i64>,
 }
 
 pub fn create_user(conn: &Connection, username: &str, password_hash: &str) -> Result<i64> {
@@ -51,19 +55,74 @@ pub fn create_user(conn: &Connection, username: &str, password_hash: &str) -> Re
 }
 
 pub fn get_user(conn: &Connection, username: &str) -> Result<Option<User>> {
-    let mut stmt =
-        conn.prepare("SELECT id, username, password_hash FROM users WHERE username = ?1")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, username, password_hash, plan, plan_expires_at FROM users WHERE username = ?1",
+    )?;
     match stmt.query_row(params![username], |r| {
         Ok(User {
             id: r.get(0)?,
             username: r.get(1)?,
             password_hash: r.get(2)?,
+            plan: r.get::<_, String>(3).unwrap_or_else(|_| "free".into()),
+            plan_expires_at: r.get(4)?,
         })
     }) {
         Ok(u) => Ok(Some(u)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+pub fn get_user_by_id(conn: &Connection, id: i64) -> Result<Option<User>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, username, password_hash, plan, plan_expires_at FROM users WHERE id = ?1",
+    )?;
+    match stmt.query_row(params![id], |r| {
+        Ok(User {
+            id: r.get(0)?,
+            username: r.get(1)?,
+            password_hash: r.get(2)?,
+            plan: r.get::<_, String>(3).unwrap_or_else(|_| "free".into()),
+            plan_expires_at: r.get(4)?,
+        })
+    }) {
+        Ok(u) => Ok(Some(u)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Vérifie si l'utilisateur a un plan actif (premium ou ultimate non expiré).
+pub fn check_premium(conn: &Connection, user_id: i64) -> Result<bool> {
+    let row = conn.query_row(
+        "SELECT plan, plan_expires_at FROM users WHERE id = ?1",
+        params![user_id],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?)),
+    );
+    match row {
+        Ok((plan, expires_at)) => {
+            let is_paid = plan == "premium" || plan == "ultimate";
+            let not_expired = expires_at
+                .map(|exp| exp > chrono::Utc::now().timestamp())
+                .unwrap_or(true);
+            Ok(is_paid && not_expired)
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn set_user_plan(
+    conn: &Connection,
+    user_id: i64,
+    plan: &str,
+    expires_at: Option<i64>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET plan = ?1, plan_expires_at = ?2 WHERE id = ?3",
+        params![plan, expires_at, user_id],
+    )?;
+    Ok(())
 }
 
 // ── Sync instances ─────────────────────────────────────────────────────────────
