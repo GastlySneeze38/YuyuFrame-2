@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AuthStatus, DeviceAuthResponse, Instance, Mod, PollResponse, SyncInstance, Version } from '@/types'
+import type { AuthStatus, DeviceAuthResponse, Instance, Mod, PollResponse, SaveInfo, SyncInstance, Version } from '@/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,8 +65,10 @@ export const api = {
 
   sync: {
     list: () => invoke<SyncInstance[]>('sync_list_instances'),
-    push: (instanceId: string) =>
-      invoke<SyncInstance>('sync_push_instance', { instanceId }),
+    listSaves: (instanceId: string) =>
+      invoke<SaveInfo[]>('sync_list_saves', { instanceId }),
+    push: (instanceId: string, saveNames: string[]) =>
+      invoke<SyncInstance>('sync_push_instance', { instanceId, saveNames }),
     pull: (syncId: number, instanceId: string) =>
       invoke<void>('sync_pull_instance', { syncId, instanceId }),
     delete: (syncId: number) =>

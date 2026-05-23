@@ -18,6 +18,8 @@ pub struct SyncInstanceBody {
     mc_version: String,
     loader: String,
     ram_mb: u32,
+    #[serde(default)]
+    save_count: u32,
 }
 
 #[derive(Serialize)]
@@ -27,9 +29,14 @@ pub struct SyncInstanceResp {
     pub mc_version: String,
     pub loader: String,
     pub ram_mb: u32,
+    pub save_count: u32,
     pub has_data: bool,
     pub updated_at: i64,
 }
+
+const QUOTA_MAX_SAVES: i64 = 3;
+const QUOTA_MAX_INSTANCES_WITH_SAVES: i64 = 3;
+const QUOTA_MAX_INSTANCES_NO_SAVES: i64 = 4;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -58,6 +65,7 @@ fn row_to_resp(row: db::SyncInstanceRow) -> SyncInstanceResp {
         mc_version: row.mc_version,
         loader: row.loader,
         ram_mb: row.ram_mb,
+        save_count: row.save_count,
         has_data: row.has_data,
         updated_at: row.updated_at,
     }
@@ -81,6 +89,50 @@ async fn upsert_instance(
 ) -> Result<Json<SyncInstanceResp>, ApiError> {
     let user_id = extract_user_id(&headers, &state.jwt_secret)?;
     let conn = state.db.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let existing = db::sync_get_by_name(&conn, user_id, &body.instance_name)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (total_instances, total_saves) = db::sync_count_user(&conn, user_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let new_save_count = body.save_count as i64;
+
+    if let Some(ref ex) = existing {
+        // Update: check that changing save_count doesn't exceed global quota
+        let delta = new_save_count - ex.save_count as i64;
+        let projected_saves = total_saves + delta;
+        if projected_saves > QUOTA_MAX_SAVES {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("Quota de saves dépassé : {}/{} utilisées", total_saves, QUOTA_MAX_SAVES),
+            ));
+        }
+    } else {
+        // New instance: check instance count and save quota
+        let projected_saves = total_saves + new_save_count;
+        let max_instances = if projected_saves > 0 {
+            QUOTA_MAX_INSTANCES_WITH_SAVES
+        } else {
+            QUOTA_MAX_INSTANCES_NO_SAVES
+        };
+        if total_instances >= max_instances {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "Quota d'instances atteint : {}/{} (avec {} save(s) au total)",
+                    total_instances, max_instances, total_saves
+                ),
+            ));
+        }
+        if projected_saves > QUOTA_MAX_SAVES {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("Quota de saves dépassé : {}/{} utilisées", total_saves, QUOTA_MAX_SAVES),
+            ));
+        }
+    }
+
     let id = db::sync_upsert(
         &conn,
         user_id,
@@ -88,8 +140,10 @@ async fn upsert_instance(
         &body.mc_version,
         &body.loader,
         body.ram_mb,
+        body.save_count,
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     let row = db::sync_get(&conn, id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "Introuvable après insertion".into()))?;

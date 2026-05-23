@@ -60,6 +60,19 @@ export interface SyncInstance {
   mc_version: string
   loader: string
   ram_mb: number
+  save_count: number
   has_data: boolean
   updated_at: number
+}
+
+export interface SaveInfo {
+  name: string
+  updated_at: number
+  size_bytes: number
+}
+
+export interface SyncProgress {
+  phase: 'compressing' | 'uploading' | 'done'
+  percent: number
+  label: string
 }

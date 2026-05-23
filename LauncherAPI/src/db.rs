@@ -2,6 +2,11 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 
 pub fn init(conn: &Connection) -> Result<()> {
+    // Migration: add save_count if missing (existing DBs)
+    let _ = conn.execute(
+        "ALTER TABLE sync_instances ADD COLUMN save_count INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          CREATE TABLE IF NOT EXISTS users (
@@ -17,6 +22,7 @@ pub fn init(conn: &Connection) -> Result<()> {
              mc_version    TEXT    NOT NULL,
              loader        TEXT    NOT NULL,
              ram_mb        INTEGER NOT NULL DEFAULT 4096,
+             save_count    INTEGER NOT NULL DEFAULT 0,
              updated_at    INTEGER NOT NULL,
              UNIQUE(user_id, instance_name)
          );
@@ -69,6 +75,7 @@ pub struct SyncInstanceRow {
     pub mc_version: String,
     pub loader: String,
     pub ram_mb: u32,
+    pub save_count: u32,
     pub has_data: bool,
     pub updated_at: i64,
 }
@@ -76,7 +83,7 @@ pub struct SyncInstanceRow {
 pub fn sync_list(conn: &Connection, user_id: i64) -> Result<Vec<SyncInstanceRow>> {
     let mut stmt = conn.prepare(
         "SELECT si.id, si.user_id, si.instance_name, si.mc_version, si.loader, si.ram_mb,
-                (sd.sync_instance_id IS NOT NULL) as has_data, si.updated_at
+                si.save_count, (sd.sync_instance_id IS NOT NULL) as has_data, si.updated_at
          FROM sync_instances si
          LEFT JOIN sync_data sd ON sd.sync_instance_id = si.id
          WHERE si.user_id = ?1
@@ -91,8 +98,9 @@ pub fn sync_list(conn: &Connection, user_id: i64) -> Result<Vec<SyncInstanceRow>
                 mc_version: r.get(3)?,
                 loader: r.get(4)?,
                 ram_mb: r.get::<_, u32>(5)?,
-                has_data: r.get::<_, i64>(6)? != 0,
-                updated_at: r.get(7)?,
+                save_count: r.get::<_, u32>(6)?,
+                has_data: r.get::<_, i64>(7)? != 0,
+                updated_at: r.get(8)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -102,7 +110,7 @@ pub fn sync_list(conn: &Connection, user_id: i64) -> Result<Vec<SyncInstanceRow>
 pub fn sync_get(conn: &Connection, id: i64) -> Result<Option<SyncInstanceRow>> {
     let mut stmt = conn.prepare(
         "SELECT si.id, si.user_id, si.instance_name, si.mc_version, si.loader, si.ram_mb,
-                (sd.sync_instance_id IS NOT NULL) as has_data, si.updated_at
+                si.save_count, (sd.sync_instance_id IS NOT NULL) as has_data, si.updated_at
          FROM sync_instances si
          LEFT JOIN sync_data sd ON sd.sync_instance_id = si.id
          WHERE si.id = ?1",
@@ -115,14 +123,56 @@ pub fn sync_get(conn: &Connection, id: i64) -> Result<Option<SyncInstanceRow>> {
             mc_version: r.get(3)?,
             loader: r.get(4)?,
             ram_mb: r.get::<_, u32>(5)?,
-            has_data: r.get::<_, i64>(6)? != 0,
-            updated_at: r.get(7)?,
+            save_count: r.get::<_, u32>(6)?,
+            has_data: r.get::<_, i64>(7)? != 0,
+            updated_at: r.get(8)?,
         })
     }) {
         Ok(row) => Ok(Some(row)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+pub fn sync_get_by_name(
+    conn: &Connection,
+    user_id: i64,
+    instance_name: &str,
+) -> Result<Option<SyncInstanceRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT si.id, si.user_id, si.instance_name, si.mc_version, si.loader, si.ram_mb,
+                si.save_count, (sd.sync_instance_id IS NOT NULL) as has_data, si.updated_at
+         FROM sync_instances si
+         LEFT JOIN sync_data sd ON sd.sync_instance_id = si.id
+         WHERE si.user_id = ?1 AND si.instance_name = ?2",
+    )?;
+    match stmt.query_row(params![user_id, instance_name], |r| {
+        Ok(SyncInstanceRow {
+            id: r.get(0)?,
+            user_id: r.get(1)?,
+            instance_name: r.get(2)?,
+            mc_version: r.get(3)?,
+            loader: r.get(4)?,
+            ram_mb: r.get::<_, u32>(5)?,
+            save_count: r.get::<_, u32>(6)?,
+            has_data: r.get::<_, i64>(7)? != 0,
+            updated_at: r.get(8)?,
+        })
+    }) {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Returns (total_instances, total_saves) for a user.
+pub fn sync_count_user(conn: &Connection, user_id: i64) -> Result<(i64, i64)> {
+    conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(save_count), 0) FROM sync_instances WHERE user_id = ?1",
+        params![user_id],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .map_err(|e| e.into())
 }
 
 pub fn sync_upsert(
@@ -132,17 +182,19 @@ pub fn sync_upsert(
     mc_version: &str,
     loader: &str,
     ram_mb: u32,
+    save_count: u32,
 ) -> Result<i64> {
     let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "INSERT INTO sync_instances (user_id, instance_name, mc_version, loader, ram_mb, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO sync_instances (user_id, instance_name, mc_version, loader, ram_mb, save_count, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(user_id, instance_name) DO UPDATE SET
              mc_version = excluded.mc_version,
              loader     = excluded.loader,
              ram_mb     = excluded.ram_mb,
+             save_count = excluded.save_count,
              updated_at = excluded.updated_at",
-        params![user_id, instance_name, mc_version, loader, ram_mb, now],
+        params![user_id, instance_name, mc_version, loader, ram_mb, save_count, now],
     )?;
     let id = conn.query_row(
         "SELECT id FROM sync_instances WHERE user_id = ?1 AND instance_name = ?2",

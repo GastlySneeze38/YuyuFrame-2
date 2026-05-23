@@ -9,6 +9,7 @@ import Settings from '@/pages/Settings'
 import Information from '@/pages/Information'
 import YuyuLogin from '@/pages/YuyuLogin'
 import Console from '@/pages/Console'
+import Sync from '@/pages/Sync'
 import { useStore } from '@/stores/useStore'
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -49,6 +50,7 @@ export default function App() {
                   <Route path="/mods" element={<Mods />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/information" element={<Information />} />
+                  <Route path="/sync" element={<Sync />} />
                 </Routes>
               </AuthGuard>
             }

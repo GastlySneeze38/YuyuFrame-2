@@ -3,7 +3,7 @@ mod jwt;
 mod routes;
 mod state;
 
-use axum::Router;
+use axum::{extract::DefaultBodyLimit, Router};
 use rusqlite::Connection;
 use state::AppState;
 use std::sync::{Arc, Mutex};
@@ -38,6 +38,7 @@ async fn main() {
     let app = Router::new()
         .merge(routes::router())
         .with_state(app_state)
+        .layer(DefaultBodyLimit::max(200 * 1024 * 1024)) // 200 Mo max pour les ZIPs de sync
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 

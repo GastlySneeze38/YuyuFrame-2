@@ -6,7 +6,7 @@ echo.
 netstat -ano | findstr ":3000 " | findstr "LISTENING" >nul 2>&1
 if %errorlevel% neq 0 (
     echo Lancement de la Launcher API sur le port 3000...
-    start "LauncherAPI" cmd /c "cd /d "%~dp0LauncherAPI" && cargo run"
+    start "LauncherAPI" cmd /c "cd /d "%~dp0LauncherAPI" && cargo watch -x run"
     echo.
 ) else (
     echo Launcher API deja active sur le port 3000.

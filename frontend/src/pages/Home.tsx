@@ -393,6 +393,9 @@ export default function Home() {
             <NavLink label="Instances" onClick={() => navigate('/instances')}>
               <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A1 1 0 013 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9z" /></svg>
             </NavLink>
+            <NavLink label="Sync" onClick={() => navigate('/sync')} premium>
+              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" /><path d="M18.4 10.6C17.55 8.99 16.15 7.8 14.5 7.31V5.26C17.01 5.81 19 7.63 19.75 10l-1.35.6zM9.5 5.26v2.05C7.85 7.8 6.45 8.99 5.6 10.6l-1.35-.6C5 7.63 6.99 5.81 9.5 5.26zM5.08 14l1.35-.6C7.17 15.19 8.71 16.34 10.5 16.74v2.05C7.76 18.36 5.59 16.45 5.08 14zm9.42 4.79v-2.05c1.79-.4 3.33-1.55 4.07-3.34l1.35.6c-.51 2.45-2.68 4.36-5.42 4.79z" /></svg>
+            </NavLink>
             <NavLink label="Réglages" onClick={() => navigate('/settings')}>
               <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" /></svg>
             </NavLink>
@@ -520,7 +523,7 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
 }
 
-function NavLink({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function NavLink({ label, onClick, premium, children }: { label: string; onClick: () => void; premium?: boolean; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
@@ -531,6 +534,11 @@ function NavLink({ label, onClick, children }: { label: string; onClick: () => v
     >
       {children}
       {label}
+      {premium && (
+        <span style={{ fontSize: 8, fontWeight: 700, color: '#818cf8', background: 'rgba(75,63,207,0.2)', padding: '1px 4px', borderRadius: 4, letterSpacing: '0.05em', marginLeft: 2 }}>
+          ★
+        </span>
+      )}
     </button>
   )
 }
