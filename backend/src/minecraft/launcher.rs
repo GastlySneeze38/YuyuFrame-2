@@ -175,6 +175,7 @@ pub async fn download_and_launch(
     // ── Loader-specific setup ────────────────────────────────────────────────
 
     let java = find_java()?;
+    let java_major = detect_java_major_version(&java).await.unwrap_or(17);
 
     let (main_class, extra_classpath, extra_game_args, extra_jvm_args) =
         match loader.unwrap_or("vanilla") {
@@ -194,15 +195,15 @@ pub async fn download_and_launch(
     full_classpath.push(client_jar.to_string_lossy().to_string());
     let classpath_str = dedup_classpath(full_classpath).join(classpath_sep);
 
-    let mut args: Vec<String> = vec![
-        format!("-Xmx{}m", ram_mb),
-        format!("-Xms{}m", ram_mb / 2),
-        format!("-Djava.library.path={}", natives_dir.display()),
-    ];
+    let mut args = build_jvm_args(ram_mb, &natives_dir, java_major);
     args.extend(extra_jvm_args);
     args.extend(["-cp".to_string(), classpath_str, main_class]);
     args.extend(build_game_args(&details, session, game_dir, &assets_dir, version_id));
     args.extend(extra_game_args);
+
+    // Passe le timer Windows à 1ms (défaut : 15ms) pour réduire le jitter de scheduling
+    #[cfg(target_os = "windows")]
+    unsafe { timeBeginPeriod(1); }
 
     let mut child = tokio::process::Command::new(&java)
         .args(&args)
@@ -241,6 +242,11 @@ pub async fn download_and_launch(
     // Clear progress — game is now running
     state.write().await.download_progress = None;
     child.wait().await?;
+
+    // Restaure la résolution du timer Windows
+    #[cfg(target_os = "windows")]
+    unsafe { timeEndPeriod(1); }
+
     Ok(())
 }
 
@@ -329,6 +335,101 @@ async fn setup_forge(
         .unwrap_or_default();
 
     Ok((forge_json.main_class, forge_cp, extra_game, extra_jvm))
+}
+
+// ── JVM args ─────────────────────────────────────────────────────────────────
+
+async fn detect_java_major_version(java: &str) -> Option<u32> {
+    let out = tokio::process::Command::new(java)
+        .arg("-version")
+        .output()
+        .await
+        .ok()?;
+    // java -version écrit sur stderr
+    let text = String::from_utf8_lossy(&out.stderr);
+    for line in text.lines() {
+        if line.contains("version") {
+            // Formats : `"21.0.2"` ou `"1.8.0_xxx"`
+            if let (Some(s), Some(e)) = (line.find('"'), line.rfind('"')) {
+                if s < e {
+                    let ver = &line[s + 1..e];
+                    let parts: Vec<&str> = ver.split('.').collect();
+                    let major: u32 = parts[0].parse().ok()?;
+                    return Some(if major == 1 {
+                        parts.get(1)?.parse().ok()?
+                    } else {
+                        major
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+fn build_jvm_args(ram_mb: u32, natives_dir: &PathBuf, java_major: u32) -> Vec<String> {
+    let base = vec![
+        format!("-Xmx{}m", ram_mb),
+        format!("-Xms{}m", ram_mb),  // Xms = Xmx : pas de redimensionnement du heap
+        format!("-Djava.library.path={}", natives_dir.display()),
+        "-XX:+DisableExplicitGC".into(),       // Ignore System.gc() appelés par les mods
+        "-XX:+AlwaysPreTouch".into(),          // Pré-alloue les pages RAM au boot
+        "-XX:+PerfDisableSharedMem".into(),    // Pas de fichiers perf OS (source de jitter)
+        "-XX:+UseStringDeduplication".into(),  // Réduit les doublons String en mémoire
+    ];
+
+    if java_major >= 21 {
+        // ── ZGC Generational (Java 21+) ───────────────────────────────────────
+        // GC concurrent : collecte en parallèle du jeu → pauses < 1ms
+        // Élimine les freezes récurrents de 200ms causés par G1 mixed collections
+        tracing::info!("Java {} détecté — ZGC Generational activé", java_major);
+        let mut args = base;
+        args.push("-XX:+UseZGC".into());
+        // ZGenerational est le défaut depuis Java 24 — ne pas l'ajouter pour éviter le warning
+        if java_major < 24 {
+            args.push("-XX:+ZGenerational".into());
+        }
+        args.extend([
+            "-XX:ZAllocationSpikeTolerance=5.0".into(),
+            "-XX:+UnlockExperimentalVMOptions".into(),
+        ]);
+        args
+    } else {
+        // ── G1GC (Java 17/18/19/20) ──────────────────────────────────────────
+        // ZGC Generational non disponible, fallback G1GC avec tuning client
+        tracing::info!("Java {} détecté — G1GC client activé", java_major);
+        let region_size = if ram_mb >= 12288 { "16M" }
+            else if ram_mb >= 6144 { "8M" }
+            else if ram_mb >= 3072 { "4M" }
+            else { "2M" };
+        let mut args = base;
+        args.extend([
+            "-XX:+UseG1GC".into(),
+            "-XX:+ParallelRefProcEnabled".into(),
+            "-XX:MaxGCPauseMillis=100".into(),
+            "-XX:+UnlockExperimentalVMOptions".into(),
+            format!("-XX:G1HeapRegionSize={}", region_size),
+            "-XX:G1NewSizePercent=30".into(),
+            "-XX:G1MaxNewSizePercent=40".into(),
+            "-XX:G1ReservePercent=20".into(),
+            "-XX:G1HeapWastePercent=5".into(),
+            "-XX:G1MixedGCCountTarget=4".into(),
+            "-XX:InitiatingHeapOccupancyPercent=20".into(),
+            "-XX:G1MixedGCLiveThresholdPercent=90".into(),
+            "-XX:G1RSetUpdatingPauseTimePercent=5".into(),
+            "-XX:SurvivorRatio=32".into(),
+            "-XX:MaxTenuringThreshold=1".into(),
+        ]);
+        args
+    }
+}
+
+// Lien vers la WinAPI multimédia (timer haute résolution)
+#[cfg(target_os = "windows")]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+    fn timeEndPeriod(uPeriod: u32) -> u32;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
