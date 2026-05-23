@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use serde::Serialize;
 
 use crate::commands::instances::instance_mods_dir;
@@ -112,6 +113,67 @@ pub async fn mods_install(
     tokio::fs::write(&dest, &bytes).await.map_err(|e| e.to_string())?;
 
     Ok(ModInfo { name: safe_name, size: bytes.len() as u64, enabled: true })
+}
+
+/// Extrait l'icône d'un mod directement depuis son JAR et la retourne en data URL base64.
+/// Lit le champ `icon` de fabric.mod.json, avec repli sur pack.png.
+#[tauri::command]
+pub async fn mod_icon(instance_id: String, name: String) -> Result<String, String> {
+    use std::io::Read;
+
+    let dir = instance_mods_dir(&instance_id);
+    let path = dir.join(&name);
+    if !path.exists() {
+        return Err("Mod introuvable".into());
+    }
+
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+
+    // Lire fabric.mod.json pour trouver le chemin de l'icône
+    let icon_path: Option<String> = {
+        let cursor = std::io::Cursor::new(&bytes);
+        if let Ok(mut archive) = zip::ZipArchive::new(cursor) {
+            if let Ok(mut entry) = archive.by_name("fabric.mod.json") {
+                let mut content = String::new();
+                let _ = entry.read_to_string(&mut content);
+                serde_json::from_str::<serde_json::Value>(&content)
+                    .ok()
+                    .and_then(|v| v.get("icon").and_then(|i| i.as_str()).map(|s| s.to_string()))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    let cursor = std::io::Cursor::new(&bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+
+    let candidates: Vec<&str> = if let Some(ref p) = icon_path {
+        vec![p.as_str(), "pack.png"]
+    } else {
+        vec!["pack.png"]
+    };
+
+    for candidate in candidates {
+        if let Ok(mut entry) = archive.by_name(candidate) {
+            let mut icon_bytes = Vec::new();
+            if entry.read_to_end(&mut icon_bytes).is_ok() && !icon_bytes.is_empty() {
+                let mime = if icon_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                    "image/png"
+                } else if icon_bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                    "image/jpeg"
+                } else {
+                    "image/png"
+                };
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&icon_bytes);
+                return Ok(format!("data:{};base64,{}", mime, b64));
+            }
+        }
+    }
+
+    Err("Pas d'icône dans ce JAR".into())
 }
 
 #[tauri::command]

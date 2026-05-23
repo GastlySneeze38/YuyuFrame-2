@@ -37,6 +37,7 @@ function displayName(name: string): string {
   return name.replace(/\.jar(\.disabled)?$/, '')
 }
 
+
 async function fetchModrinthSearch(
   query: string,
   gameVersion: string,
@@ -102,6 +103,24 @@ export function ModsContent({ instance }: { instance: Instance }) {
   const [searchError, setSearchError] = useState('')
   const [installing, setInstalling] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [modSearch, setModSearch] = useState('')
+  const [showLogos, setShowLogos] = useState(true)
+  const [logoCache, setLogoCache] = useState<Record<string, string | null>>({})
+
+  useEffect(() => {
+    if (!showLogos || mods.length === 0) return
+    mods.forEach(async (mod) => {
+      const key = displayName(mod.name)
+      if (key in logoCache) return
+      try {
+        const dataUrl = await api.mods.icon(instanceId, mod.name)
+        setLogoCache((prev) => ({ ...prev, [key]: dataUrl }))
+      } catch {
+        setLogoCache((prev) => ({ ...prev, [key]: null }))
+      }
+    })
+  }, [showLogos, mods])
 
   const loadMods = async () => {
     if (!instanceId) return
@@ -221,6 +240,22 @@ export function ModsContent({ instance }: { instance: Instance }) {
                 : isPlugin ? 'Parcourir les plugins' : 'Parcourir Modrinth'}
             </button>
           ))}
+          {tab === 'installed' && (
+            <button
+              onClick={() => setShowLogos((v) => !v)}
+              title={showLogos ? 'Masquer les logos' : 'Afficher les logos'}
+              className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all duration-150"
+              style={{
+                background: showLogos ? 'rgba(75,63,207,0.25)' : 'transparent',
+                color: showLogos ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
+                border: `1px solid ${showLogos ? 'rgba(75,63,207,0.5)' : 'rgba(255,255,255,0.08)'}`,
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+              </svg>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -260,6 +295,10 @@ export function ModsContent({ instance }: { instance: Instance }) {
             loading={loadingMods}
             error={modsError}
             isPlugin={isPlugin}
+            modSearch={modSearch}
+            onModSearch={setModSearch}
+            showLogos={showLogos}
+            logoCache={logoCache}
             onReload={loadMods}
             onToggle={handleToggle}
             onDelete={handleDelete}
@@ -332,31 +371,71 @@ export default function Mods() {
 // ── Installed tab ─────────────────────────────────────────────────────────────
 
 function InstalledTab({
-  mods, loading, error, isPlugin, onReload, onToggle, onDelete,
+  mods, loading, error, isPlugin, modSearch, onModSearch, showLogos, logoCache, onReload, onToggle, onDelete,
 }: {
   mods: Mod[]
   loading: boolean
   error: string
   isPlugin: boolean
+  modSearch: string
+  onModSearch: (v: string) => void
+  showLogos: boolean
+  logoCache: Record<string, string | null>
   onReload: () => void
   onToggle: (mod: Mod) => void
   onDelete: (name: string) => void
 }) {
   if (loading) return <Spinner />
   if (error) return <ErrorState message={error} onRetry={onReload} />
-  if (mods.length === 0) return (
-    <EmptyState
-      icon={<PlugIcon size={28} color="rgba(75,63,207,0.55)" />}
-      title={isPlugin ? 'Aucun plugin installé' : 'Aucun mod installé'}
-      subtitle={isPlugin
-        ? 'Importez un .jar ou parcourez les plugins'
-        : 'Cliquez sur "Importer un mod" ou parcourez Modrinth'}
-    />
+
+  const filtered = mods.filter((m) =>
+    displayName(m.name).toLowerCase().includes(modSearch.toLowerCase()),
   )
+
   return (
     <div className="flex flex-col gap-2">
-      {mods.map((mod) => (
-        <ModRow key={mod.name} mod={mod} onToggle={() => onToggle(mod)} onDelete={() => onDelete(mod.name)} />
+      {mods.length > 0 && (
+        <div className="relative mb-1">
+          <svg viewBox="0 0 24 24" fill="currentColor" width={14} height={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: 'rgba(255,255,255,0.3)' }}>
+            <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Filtrer les mods..."
+            value={modSearch}
+            onChange={(e) => onModSearch(e.target.value)}
+            className="w-full rounded-xl pl-8 pr-4 text-sm text-white outline-none"
+            style={{ height: 36, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(75,63,207,0.6)' }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)' }}
+          />
+        </div>
+      )}
+      {filtered.length === 0 && mods.length === 0 && (
+        <EmptyState
+          icon={<PlugIcon size={28} color="rgba(75,63,207,0.55)" />}
+          title={isPlugin ? 'Aucun plugin installé' : 'Aucun mod installé'}
+          subtitle={isPlugin
+            ? 'Importez un .jar ou parcourez les plugins'
+            : 'Cliquez sur "Importer un mod" ou parcourez Modrinth'}
+        />
+      )}
+      {filtered.length === 0 && mods.length > 0 && (
+        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', textAlign: 'center', marginTop: 32 }}>
+          Aucun mod ne correspond à « {modSearch} »
+        </p>
+      )}
+      {filtered.map((mod) => (
+        <ModRow
+          key={mod.name}
+          mod={mod}
+          showLogos={showLogos}
+          logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
+          onToggle={() => onToggle(mod)}
+          onDelete={() => onDelete(mod.name)}
+        />
       ))}
     </div>
   )
@@ -431,15 +510,24 @@ function BrowseTab({
 
 // ── Mod row ───────────────────────────────────────────────────────────────────
 
-function ModRow({ mod, onToggle, onDelete }: { mod: Mod; onToggle: () => void; onDelete: () => void }) {
+function ModRow({ mod, showLogos, logoUrl, onToggle, onDelete }: {
+  mod: Mod
+  showLogos: boolean
+  logoUrl: string | null
+  onToggle: () => void
+  onDelete: () => void
+}) {
   const [confirm, setConfirm] = useState(false)
   return (
     <div
       className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-150"
       style={{ background: mod.enabled ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.018)', border: '1px solid rgba(255,255,255,0.06)', opacity: mod.enabled ? 1 : 0.6 }}
     >
-      <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: mod.enabled ? 'rgba(75,63,207,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <PlugIcon size={18} color={mod.enabled ? 'rgba(120,110,230,0.8)' : 'rgba(255,255,255,0.2)'} />
+      <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, overflow: 'hidden', background: mod.enabled ? 'rgba(75,63,207,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {showLogos && logoUrl
+          ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <PlugIcon size={18} color={mod.enabled ? 'rgba(120,110,230,0.8)' : 'rgba(255,255,255,0.2)'} />
+        }
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold" style={{ fontSize: 13, color: mod.enabled ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)' }}>

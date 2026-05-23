@@ -75,5 +75,8 @@ export const api = {
       const data = Array.from(new Uint8Array(await file.arrayBuffer()))
       return invoke<Mod>('mods_upload', { instanceId, filename: file.name, data })
     },
+
+    icon: (instanceId: string, name: string) =>
+      invoke<string>('mod_icon', { instanceId, name }),
   },
 }
