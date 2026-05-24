@@ -34,6 +34,7 @@ export interface Mod {
   name: string
   size: number
   enabled: boolean
+  sha1: string
 }
 
 export type Loader = 'vanilla' | 'fabric' | 'forge'

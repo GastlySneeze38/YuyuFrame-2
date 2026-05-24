@@ -1,5 +1,6 @@
 use base64::Engine as _;
 use serde::Serialize;
+use sha1::{Digest, Sha1};
 
 use crate::commands::instances::instance_mods_dir;
 
@@ -8,6 +9,21 @@ pub struct ModInfo {
     pub name: String,
     pub size: u64,
     pub enabled: bool,
+    pub sha1: String,
+}
+
+fn compute_sha1(path: &std::path::Path) -> String {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else { return String::new() };
+    let mut hasher = Sha1::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        match file.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+        }
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 #[tauri::command]
@@ -25,7 +41,8 @@ pub async fn mods_list(instance_id: String) -> Result<Vec<ModInfo>, String> {
                 continue;
             }
             let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
-            mods.push(ModInfo { name, size, enabled });
+            let sha1 = compute_sha1(&path);
+            mods.push(ModInfo { name, size, enabled, sha1 });
         }
     }
 
@@ -54,7 +71,8 @@ pub async fn mods_toggle(instance_id: String, name: String) -> Result<ModInfo, S
     tokio::fs::rename(&from, &to).await.map_err(|e| e.to_string())?;
 
     let size = tokio::fs::metadata(&to).await.map(|m| m.len()).unwrap_or(0);
-    Ok(ModInfo { name: to_name, size, enabled })
+    let sha1 = compute_sha1(&to);
+    Ok(ModInfo { name: to_name, size, enabled, sha1 })
 }
 
 #[tauri::command]
@@ -111,8 +129,9 @@ pub async fn mods_install(
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     let dest = dir.join(&safe_name);
     tokio::fs::write(&dest, &bytes).await.map_err(|e| e.to_string())?;
+    let sha1 = compute_sha1(&dest);
 
-    Ok(ModInfo { name: safe_name, size: bytes.len() as u64, enabled: true })
+    Ok(ModInfo { name: safe_name, size: bytes.len() as u64, enabled: true, sha1 })
 }
 
 /// Extrait l'icône d'un mod directement depuis son JAR et la retourne en data URL base64.
@@ -197,6 +216,7 @@ pub async fn mods_upload(
     let dest = dir.join(&safe_name);
     let size = data.len() as u64;
     tokio::fs::write(&dest, &data).await.map_err(|e| e.to_string())?;
+    let sha1 = compute_sha1(&dest);
 
-    Ok(ModInfo { name: safe_name, size, enabled: true })
+    Ok(ModInfo { name: safe_name, size, enabled: true, sha1 })
 }

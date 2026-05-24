@@ -38,6 +38,26 @@ function displayName(name: string): string {
 }
 
 
+async function fetchVersionsByHash(sha1s: string[]): Promise<Record<string, string>> {
+  if (sha1s.length === 0) return {}
+  const hashes: Record<string, null> = {}
+  sha1s.forEach((h) => { if (h) hashes[h] = null })
+  try {
+    const res = await fetch('https://api.modrinth.com/v2/version_files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'YuyuFrame/1.0' },
+      body: JSON.stringify({ hashes, algorithm: 'sha1' }),
+    })
+    if (!res.ok) return {}
+    const data = await res.json() as Record<string, { version_number: string }>
+    const out: Record<string, string> = {}
+    for (const [hash, info] of Object.entries(data)) out[hash] = info.version_number
+    return out
+  } catch {
+    return {}
+  }
+}
+
 async function fetchModrinthSearch(
   query: string,
   gameVersion: string,
@@ -95,7 +115,11 @@ export function ModsContent({ instance }: { instance: Instance }) {
   const [loadingMods, setLoadingMods] = useState(true)
   const [modsError, setModsError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [versionMap, setVersionMap] = useState<Record<string, string>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const mergeVersions = (fetched: Record<string, string>) =>
+    setVersionMap((prev) => ({ ...prev, ...fetched }))
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ModrinthHit[]>([])
@@ -127,7 +151,9 @@ export function ModsContent({ instance }: { instance: Instance }) {
     setLoadingMods(true)
     setModsError('')
     try {
-      setMods(await api.mods.list(instanceId))
+      const loaded = await api.mods.list(instanceId)
+      setMods(loaded)
+      fetchVersionsByHash(loaded.map((m) => m.sha1)).then(mergeVersions)
     } catch {
       setModsError('Impossible de charger les mods')
     } finally {
@@ -167,6 +193,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
         [...prev.filter((m) => m.name !== newMod.name), newMod]
           .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
       )
+      fetchVersionsByHash([newMod.sha1]).then(mergeVersions)
     } catch {
       setModsError("Erreur lors de l'import")
     } finally {
@@ -209,6 +236,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
         [...prev.filter((m) => m.name !== newMod.name), newMod]
           .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
       )
+      fetchVersionsByHash([newMod.sha1]).then(mergeVersions)
     } catch (e) {
       setSearchError(e instanceof Error ? e.message : 'Erreur installation')
     } finally {
@@ -299,6 +327,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
             onModSearch={setModSearch}
             showLogos={showLogos}
             logoCache={logoCache}
+            versionMap={versionMap}
             onReload={loadMods}
             onToggle={handleToggle}
             onDelete={handleDelete}
@@ -371,7 +400,7 @@ export default function Mods() {
 // ── Installed tab ─────────────────────────────────────────────────────────────
 
 function InstalledTab({
-  mods, loading, error, isPlugin, modSearch, onModSearch, showLogos, logoCache, onReload, onToggle, onDelete,
+  mods, loading, error, isPlugin, modSearch, onModSearch, showLogos, logoCache, versionMap, onReload, onToggle, onDelete,
 }: {
   mods: Mod[]
   loading: boolean
@@ -381,6 +410,7 @@ function InstalledTab({
   onModSearch: (v: string) => void
   showLogos: boolean
   logoCache: Record<string, string | null>
+  versionMap: Record<string, string>
   onReload: () => void
   onToggle: (mod: Mod) => void
   onDelete: (name: string) => void
@@ -391,6 +421,8 @@ function InstalledTab({
   const filtered = mods.filter((m) =>
     displayName(m.name).toLowerCase().includes(modSearch.toLowerCase()),
   )
+
+  const hdr = { fontSize: 10, color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase' as const, letterSpacing: '0.09em', fontWeight: 600 }
 
   return (
     <div className="flex flex-col gap-2">
@@ -427,10 +459,23 @@ function InstalledTab({
           Aucun mod ne correspond à « {modSearch} »
         </p>
       )}
+      {filtered.length > 0 && (
+        <div
+          className="flex items-center gap-3 px-4 py-1.5"
+          style={{ position: 'sticky', top: 0, zIndex: 1, background: '#09090D', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 2 }}
+        >
+          <div style={{ width: 36, flexShrink: 0 }} />
+          <div className="min-w-0 flex-1" style={hdr}>Mod</div>
+          <div style={{ width: 96, flexShrink: 0, ...hdr }}>Version</div>
+          <div style={{ width: 40, flexShrink: 0 }} />
+          <div style={{ width: 32, flexShrink: 0, ...hdr, textAlign: 'center' }}>Action</div>
+        </div>
+      )}
       {filtered.map((mod) => (
         <ModRow
           key={mod.name}
           mod={mod}
+          version={versionMap[mod.sha1] ?? null}
           showLogos={showLogos}
           logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
           onToggle={() => onToggle(mod)}
@@ -510,8 +555,9 @@ function BrowseTab({
 
 // ── Mod row ───────────────────────────────────────────────────────────────────
 
-function ModRow({ mod, showLogos, logoUrl, onToggle, onDelete }: {
+function ModRow({ mod, version, showLogos, logoUrl, onToggle, onDelete }: {
   mod: Mod
+  version: string | null
   showLogos: boolean
   logoUrl: string | null
   onToggle: () => void
@@ -534,6 +580,11 @@ function ModRow({ mod, showLogos, logoUrl, onToggle, onDelete }: {
           {displayName(mod.name)}
         </p>
         <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 1 }}>{formatSize(mod.size)}</p>
+      </div>
+      <div style={{ width: 96, flexShrink: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 500, color: version ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)' }}>
+          {version ?? '—'}
+        </span>
       </div>
       <button onClick={onToggle} title={mod.enabled ? 'Désactiver' : 'Activer'}
         className="relative flex-shrink-0"
