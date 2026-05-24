@@ -329,16 +329,16 @@ export default function Home() {
           {/* Launch button */}
           <button
             onClick={username ? handleLaunch : () => navigate('/login')}
-            disabled={gameRunning || !selectedInstanceId}
+            disabled={gameRunning || (!!username && !selectedInstanceId)}
             className="w-full font-bold text-white transition-all duration-200 active:scale-95"
             style={{
               height: 60, borderRadius: 16, fontSize: 14, letterSpacing: '0.04em',
-              background: canLaunch ? '#4B3FCF' : 'rgba(40,38,65,0.7)',
+              background: canLaunch ? '#4B3FCF' : !username ? 'rgba(75,63,207,0.45)' : 'rgba(40,38,65,0.7)',
               boxShadow: canLaunch ? '0 4px 28px rgba(75,63,207,0.42)' : 'none',
-              cursor: canLaunch ? 'pointer' : 'not-allowed',
+              cursor: (gameRunning || (!!username && !selectedInstanceId)) ? 'not-allowed' : 'pointer',
             }}
-            onMouseEnter={(e) => { if (canLaunch) { e.currentTarget.style.background = '#6155e8'; e.currentTarget.style.boxShadow = '0 6px 32px rgba(75,63,207,0.62)' } }}
-            onMouseLeave={(e) => { if (canLaunch) { e.currentTarget.style.background = '#4B3FCF'; e.currentTarget.style.boxShadow = '0 4px 28px rgba(75,63,207,0.42)' } }}
+            onMouseEnter={(e) => { if (canLaunch) { e.currentTarget.style.background = '#6155e8'; e.currentTarget.style.boxShadow = '0 6px 32px rgba(75,63,207,0.62)' } else if (!username) { e.currentTarget.style.background = 'rgba(75,63,207,0.65)' } }}
+            onMouseLeave={(e) => { if (canLaunch) { e.currentTarget.style.background = '#4B3FCF'; e.currentTarget.style.boxShadow = '0 4px 28px rgba(75,63,207,0.42)' } else if (!username) { e.currentTarget.style.background = 'rgba(75,63,207,0.45)' } }}
           >
             {gameRunning ? (
               <span className="flex items-center justify-center gap-2">
