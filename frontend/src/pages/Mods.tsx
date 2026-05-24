@@ -9,6 +9,7 @@ import type { Instance, Mod } from '@/types'
 interface ModrinthInfo {
   version: string
   modrinthName: string
+  projectId: string
 }
 
 // ── Modrinth types ────────────────────────────────────────────────────────────
@@ -73,12 +74,46 @@ async function fetchVersionsByHash(sha1s: string[]): Promise<Record<string, Modr
 
     const out: Record<string, ModrinthInfo> = {}
     for (const [hash, info] of Object.entries(versionData)) {
-      out[hash] = { version: info.version_number, modrinthName: projectNames[info.project_id] ?? '' }
+      out[hash] = { version: info.version_number, modrinthName: projectNames[info.project_id] ?? '', projectId: info.project_id }
     }
     return out
   } catch {
     return {}
   }
+}
+
+export async function updateModsForNewVersion(
+  instanceId: string,
+  mcVersion: string,
+  loader: string,
+): Promise<void> {
+  try {
+    const mods = await api.mods.list(instanceId)
+    if (mods.length === 0) return
+    const infoMap = await fetchVersionsByHash(mods.map((m) => m.sha1))
+    for (const mod of mods) {
+      const info = infoMap[mod.sha1]
+      if (!info?.projectId) continue
+      try {
+        const params = new URLSearchParams()
+        params.set('game_versions', JSON.stringify([mcVersion]))
+        if (loader !== 'vanilla') params.set('loaders', JSON.stringify([loader]))
+        const res = await fetch(
+          `https://api.modrinth.com/v2/project/${info.projectId}/version?${params}`,
+          { headers: { 'User-Agent': 'YuyuFrame/1.0' } },
+        )
+        if (!res.ok) continue
+        const versions = await res.json() as Array<{ files: Array<{ url: string; filename: string; primary: boolean }> }>
+        if (!versions.length) continue
+        const file = versions[0].files.find((f) => f.primary) ?? versions[0].files[0]
+        if (!file) continue
+        const newMod = await api.mods.install(instanceId, file.url, file.filename)
+        if (newMod.name !== mod.name) {
+          await api.mods.delete(instanceId, mod.name).catch(() => {})
+        }
+      } catch { /* ce mod est ignoré */ }
+    }
+  } catch { /* ignore */ }
 }
 
 async function fetchModrinthSearch(

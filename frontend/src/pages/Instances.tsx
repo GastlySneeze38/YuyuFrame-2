@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
 import type { Instance, Loader } from '@/types'
-import { ModsContent } from '@/pages/Mods'
+import { ModsContent, updateModsForNewVersion } from '@/pages/Mods'
 
 const LOADERS: Loader[] = ['vanilla', 'fabric', 'forge']
 const RAM_OPTIONS = [1024, 2048, 4096, 6144, 8192]
@@ -211,29 +211,36 @@ function CreateModal({
   )
 }
 
-// ── Edit modal (nom + RAM uniquement) ─────────────────────────────────────────
+// ── Edit modal ────────────────────────────────────────────────────────────────
 
 function EditModal({
   instance,
+  versions,
   onClose,
   onUpdate,
 }: {
   instance: Instance
+  versions: string[]
   onClose: () => void
   onUpdate: (instance: Instance) => void
 }) {
   const [name, setName] = useState(instance.name)
+  const [mcVersion, setMcVersion] = useState(instance.mc_version)
   const [ram, setRam] = useState(instance.ram_mb)
   const [loading, setLoading] = useState(false)
+  const [loadingLabel, setLoadingLabel] = useState('Enregistrement...')
   const [error, setError] = useState('')
 
   const handleSave = async () => {
     if (!name.trim()) { setError('Nom requis'); return }
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setLoadingLabel('Enregistrement...')
     try {
-      const updated = await api.instances.update(instance.id, name.trim(), instance.mc_version, instance.loader, ram)
+      const updated = await api.instances.update(instance.id, name.trim(), mcVersion, instance.loader, ram)
+      if (mcVersion !== instance.mc_version) {
+        setLoadingLabel('Mise à jour des mods...')
+        await updateModsForNewVersion(instance.id, mcVersion, instance.loader)
+      }
       onUpdate(updated)
-      onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -245,9 +252,43 @@ function EditModal({
     <ModalShell title="Modifier l'instance" onClose={onClose}>
       <div className="flex flex-col gap-4">
         <NameInput value={name} onChange={setName} onEnter={handleSave} />
+
+        <div>
+          <label style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>Version MC</label>
+          <div className="relative mt-1">
+            <select
+              value={mcVersion}
+              onChange={(e) => setMcVersion(e.target.value)}
+              className="w-full appearance-none rounded-xl px-3 pr-7 text-sm font-medium text-white outline-none"
+              style={{ height: 40, background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              {versions.map((v) => (
+                <option key={v} value={v} style={{ background: '#111118' }}>{v}</option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+              <svg viewBox="0 0 10 6" fill="white" width={10} height={6} style={{ opacity: 0.4 }}>
+                <path d="M0 0l5 6 5-6z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
         <RamPicker value={ram} onChange={setRam} />
+
+        {mcVersion !== instance.mc_version && (
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: 'rgba(75,63,207,0.08)', border: '1px solid rgba(75,63,207,0.25)' }}>
+            <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13} style={{ color: 'rgba(120,110,230,0.7)', flexShrink: 0 }}>
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+            </svg>
+            <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+              Les mods compatibles seront mis à jour pour <span style={{ color: 'rgba(120,110,230,0.9)', fontWeight: 600 }}>{mcVersion}</span>.
+            </p>
+          </div>
+        )}
+
         {error && <p style={{ fontSize: 12, color: 'rgb(248,113,113)' }}>{error}</p>}
-        <SubmitButton loading={loading} label="Enregistrer" loadingLabel="Enregistrement..." onClick={handleSave} />
+        <SubmitButton loading={loading} label="Enregistrer" loadingLabel={loadingLabel} onClick={handleSave} />
       </div>
     </ModalShell>
   )
@@ -270,13 +311,18 @@ function DuplicateModal({
   const [mcVersion, setMcVersion] = useState(source.mc_version)
   const [ram, setRam] = useState(source.ram_mb)
   const [loading, setLoading] = useState(false)
+  const [loadingLabel, setLoadingLabel] = useState('Duplication...')
   const [error, setError] = useState('')
 
   const handleDuplicate = async () => {
     if (!name.trim()) { setError('Nom requis'); return }
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setLoadingLabel('Duplication...')
     try {
       const instance = await api.instances.duplicate(source.id, name.trim(), mcVersion, ram)
+      if (mcVersion !== source.mc_version) {
+        setLoadingLabel('Mise à jour des mods...')
+        await updateModsForNewVersion(instance.id, mcVersion, source.loader)
+      }
       onDuplicate(instance)
       onClose()
     } catch (e) {
@@ -319,13 +365,16 @@ function DuplicateModal({
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
           </svg>
           <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
-            Loader <span style={{ color: loaderColor(source.loader), fontWeight: 600 }}>{source.loader}</span> conservé — les mods seront copiés.
+            Loader <span style={{ color: loaderColor(source.loader), fontWeight: 600 }}>{source.loader}</span> conservé —{' '}
+            {mcVersion !== source.mc_version
+              ? <>les mods compatibles seront mis à jour pour <span style={{ color: 'rgba(120,110,230,0.9)', fontWeight: 600 }}>{mcVersion}</span>.</>
+              : 'les mods seront copiés.'}
           </p>
         </div>
 
         {error && <p style={{ fontSize: 12, color: 'rgb(248,113,113)' }}>{error}</p>}
 
-        <SubmitButton loading={loading} label="Dupliquer" loadingLabel="Duplication..." onClick={handleDuplicate} />
+        <SubmitButton loading={loading} label="Dupliquer" loadingLabel={loadingLabel} onClick={handleDuplicate} />
       </div>
     </ModalShell>
   )
@@ -619,7 +668,7 @@ export default function Instances() {
         {/* Right panel — mods */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {selectedInstance ? (
-            <ModsContent instance={selectedInstance} />
+            <ModsContent key={`${selectedInstance.id}-${selectedInstance.mc_version}`} instance={selectedInstance} />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3">
               <div style={{ fontSize: 32, opacity: 0.4 }}>←</div>
@@ -650,6 +699,7 @@ export default function Instances() {
       {editTarget && (
         <EditModal
           instance={editTarget}
+          versions={releaseVersions}
           onClose={() => setEditTarget(null)}
           onUpdate={(updated) => {
             updateInstance(updated)
