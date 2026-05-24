@@ -231,6 +231,12 @@ async function fetchLatestVersion(
 
 type Tab = 'installed' | 'browse'
 
+// Cache module-level : évite de rappeler Modrinth à chaque ouverture du panel
+const _modrinthCache: Record<string, {
+  versionMap: Record<string, ModrinthInfo>
+  updates: ModUpdate[]
+}> = {}
+
 // ── ModsContent — embeddable in any page ──────────────────────────────────────
 
 export function ModsContent({ instance }: { instance: Instance }) {
@@ -284,10 +290,19 @@ export function ModsContent({ instance }: { instance: Instance }) {
     try {
       const loaded = await api.mods.list(instanceId)
       setMods(loaded)
-      fetchVersionsByHash(loaded.map((m) => m.sha1)).then((vd) => {
-        mergeVersions(vd)
-        checkForUpdates(loaded, vd, mcVersion, loader).then(setUpdates)
-      })
+      const cached = _modrinthCache[instanceId]
+      if (cached) {
+        setVersionMap(cached.versionMap)
+        setUpdates(cached.updates)
+      } else {
+        fetchVersionsByHash(loaded.map((m) => m.sha1)).then((vd) => {
+          mergeVersions(vd)
+          checkForUpdates(loaded, vd, mcVersion, loader).then((upd) => {
+            setUpdates(upd)
+            _modrinthCache[instanceId] = { versionMap: vd, updates: upd }
+          })
+        })
+      }
     } catch {
       setModsError('Impossible de charger les mods')
     } finally {
@@ -314,6 +329,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
     try {
       await api.mods.delete(instanceId, name)
       setMods((prev) => prev.filter((m) => m.name !== name))
+      delete _modrinthCache[instanceId]
     } catch { /* ignore */ }
   }
 
@@ -332,6 +348,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
       }
       setUpdates((prev) => prev.filter((u) => u.mod.sha1 !== update.mod.sha1))
       fetchVersionsByHash([newMod.sha1]).then(mergeVersions)
+      delete _modrinthCache[instanceId]
     } catch { /* ignore */ }
     finally {
       setUpdatingMods((prev) => { const s = new Set(prev); s.delete(update.mod.sha1); return s })
@@ -357,6 +374,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
           .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
       )
       fetchVersionsByHash([newMod.sha1]).then(mergeVersions)
+      delete _modrinthCache[instanceId]
     } catch {
       setModsError("Erreur lors de l'import")
     } finally {
@@ -400,6 +418,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
           .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
       )
       fetchVersionsByHash([newMod.sha1]).then(mergeVersions)
+      delete _modrinthCache[instanceId]
     } catch (e) {
       setSearchError(e instanceof Error ? e.message : 'Erreur installation')
     } finally {
