@@ -93,6 +93,7 @@ export async function updateModsForNewVersion(
     const infoMap = await fetchVersionsByHash(mods.map((m) => m.sha1))
     for (const mod of mods) {
       const info = infoMap[mod.sha1]
+      // Mod inconnu de Modrinth (custom/privé) → on ne touche pas
       if (!info?.projectId) continue
       try {
         const params = new URLSearchParams()
@@ -102,16 +103,30 @@ export async function updateModsForNewVersion(
           `https://api.modrinth.com/v2/project/${info.projectId}/version?${params}`,
           { headers: { 'User-Agent': 'YuyuFrame/1.0' } },
         )
-        if (!res.ok) continue
+        if (!res.ok) {
+          // Erreur réseau → désactiver par précaution si le mod est actif
+          if (mod.enabled) await api.mods.toggle(instanceId, mod.name).catch(() => {})
+          continue
+        }
         const versions = await res.json() as Array<{ files: Array<{ url: string; filename: string; primary: boolean }> }>
-        if (!versions.length) continue
+        if (!versions.length) {
+          // Aucune version compatible → désactiver (ne pas crasher le jeu)
+          if (mod.enabled) await api.mods.toggle(instanceId, mod.name).catch(() => {})
+          continue
+        }
         const file = versions[0].files.find((f) => f.primary) ?? versions[0].files[0]
-        if (!file) continue
+        if (!file) {
+          if (mod.enabled) await api.mods.toggle(instanceId, mod.name).catch(() => {})
+          continue
+        }
         const newMod = await api.mods.install(instanceId, file.url, file.filename)
         if (newMod.name !== mod.name) {
           await api.mods.delete(instanceId, mod.name).catch(() => {})
         }
-      } catch { /* ce mod est ignoré */ }
+      } catch {
+        // Erreur inattendue → désactiver par sécurité
+        if (mod.enabled) await api.mods.toggle(instanceId, mod.name).catch(() => {})
+      }
     }
   } catch { /* ignore */ }
 }
