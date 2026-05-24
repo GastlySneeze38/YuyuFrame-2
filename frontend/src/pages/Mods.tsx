@@ -421,12 +421,13 @@ function InstalledTab({
     displayName(m.name).toLowerCase().includes(modSearch.toLowerCase()),
   )
 
-  const hdr = { fontSize: 10, color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase' as const, letterSpacing: '0.09em', fontWeight: 600 }
+  const hdr: React.CSSProperties = { fontSize: 10, color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase', letterSpacing: '0.09em', fontWeight: 600 }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div>
+      {/* Barre de recherche */}
       {mods.length > 0 && (
-        <div className="relative mb-1">
+        <div className="relative mb-3">
           <svg viewBox="0 0 24 24" fill="currentColor" width={14} height={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
             style={{ color: 'rgba(255,255,255,0.3)' }}>
@@ -444,6 +445,8 @@ function InstalledTab({
           />
         </div>
       )}
+
+      {/* États vides */}
       {filtered.length === 0 && mods.length === 0 && (
         <EmptyState
           icon={<PlugIcon size={28} color="rgba(75,63,207,0.55)" />}
@@ -458,29 +461,33 @@ function InstalledTab({
           Aucun mod ne correspond à « {modSearch} »
         </p>
       )}
+
+      {/* En-tête tableur — sticky par rapport au conteneur scrollable parent */}
       {filtered.length > 0 && (
         <div
           className="flex items-center gap-3 px-4 py-1.5"
-          style={{ position: 'sticky', top: 0, zIndex: 1, background: '#09090D', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 2 }}
+          style={{ position: 'sticky', top: -12, zIndex: 10, background: '#09090D', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: 8 }}
         >
-          <div style={{ width: 36, flexShrink: 0 }} />
-          <div className="min-w-0 flex-1" style={hdr}>Mod</div>
-          <div style={{ width: 96, flexShrink: 0, ...hdr }}>Version</div>
-          <div style={{ width: 40, flexShrink: 0 }} />
-          <div style={{ width: 32, flexShrink: 0, ...hdr, textAlign: 'center' }}>Action</div>
+          <div style={{ flex: 1, ...hdr, paddingLeft: 48 }}>Mod</div>
+          <div style={{ flexShrink: 0, width: 110, ...hdr, textAlign: 'center' }}>Version</div>
+          <div style={{ flex: 1, ...hdr, textAlign: 'right' }}>Action</div>
         </div>
       )}
-      {filtered.map((mod) => (
-        <ModRow
-          key={mod.name}
-          mod={mod}
-          version={versionMap[mod.sha1] ?? null}
-          showLogos={showLogos}
-          logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
-          onToggle={() => onToggle(mod)}
-          onDelete={() => onDelete(mod.name)}
-        />
-      ))}
+
+      {/* Liste des mods */}
+      <div className="flex flex-col gap-2">
+        {filtered.map((mod) => (
+          <ModRow
+            key={mod.name}
+            mod={mod}
+            version={versionMap[mod.sha1] ?? null}
+            showLogos={showLogos}
+            logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
+            onToggle={() => onToggle(mod)}
+            onDelete={() => onDelete(mod.name)}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -565,47 +572,56 @@ function ModRow({ mod, version, showLogos, logoUrl, onToggle, onDelete }: {
   const [confirm, setConfirm] = useState(false)
   return (
     <div
-      className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-150"
+      className="flex items-center rounded-2xl px-4 py-3 transition-all duration-150"
       style={{ background: mod.enabled ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.018)', border: '1px solid rgba(255,255,255,0.06)', opacity: mod.enabled ? 1 : 0.6 }}
     >
-      <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, overflow: 'hidden', background: mod.enabled ? 'rgba(75,63,207,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {showLogos && logoUrl
-          ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <PlugIcon size={18} color={mod.enabled ? 'rgba(120,110,230,0.8)' : 'rgba(255,255,255,0.2)'} />
-        }
+      {/* Section gauche : icône + nom (flex-1) */}
+      <div className="flex items-center gap-3 min-w-0" style={{ flex: 1 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, overflow: 'hidden', background: mod.enabled ? 'rgba(75,63,207,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {showLogos && logoUrl
+            ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <PlugIcon size={18} color={mod.enabled ? 'rgba(120,110,230,0.8)' : 'rgba(255,255,255,0.2)'} />
+          }
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-semibold" style={{ fontSize: 13, color: mod.enabled ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)' }}>
+            {displayName(mod.name)}
+          </p>
+          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 1 }}>{formatSize(mod.size)}</p>
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold" style={{ fontSize: 13, color: mod.enabled ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)' }}>
-          {displayName(mod.name)}
-        </p>
-        <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 1 }}>{formatSize(mod.size)}</p>
-      </div>
-      <div style={{ width: 96, flexShrink: 0 }}>
-        <span style={{ fontSize: 11, fontWeight: 500, color: version ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)' }}>
+
+      {/* Section centre : version (vraiment au milieu car flanquée de 2 flex-1) */}
+      <div style={{ flexShrink: 0, width: 110, textAlign: 'center', padding: '0 8px' }}>
+        <span style={{ fontSize: 11, fontWeight: 500, color: version ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.15)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
           {version ?? '—'}
         </span>
       </div>
-      <button onClick={onToggle} title={mod.enabled ? 'Désactiver' : 'Activer'}
-        className="relative flex-shrink-0"
-        style={{ width: 40, height: 22, borderRadius: 11, background: mod.enabled ? '#4B3FCF' : 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer' }}>
-        <span className="absolute transition-all duration-200" style={{ top: 3, left: mod.enabled ? 21 : 3, width: 16, height: 16, borderRadius: '50%', background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }} />
-      </button>
-      {confirm ? (
-        <div className="flex flex-shrink-0 items-center gap-1">
-          <button onClick={() => { onDelete(); setConfirm(false) }} style={{ fontSize: 11, fontWeight: 600, color: 'rgb(248,113,113)', background: 'rgba(200,50,50,0.15)', borderRadius: 8, padding: '4px 10px' }}>Supprimer</button>
-          <button onClick={() => setConfirm(false)} style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: '4px 10px' }}>Annuler</button>
-        </div>
-      ) : (
-        <button onClick={() => setConfirm(true)}
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl transition-all duration-150"
-          style={{ color: 'rgba(255,255,255,0.2)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'rgb(248,113,113)'; e.currentTarget.style.background = 'rgba(200,50,50,0.12)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.2)'; e.currentTarget.style.background = 'transparent' }}>
-          <svg viewBox="0 0 24 24" fill="currentColor" width={16} height={16}>
-            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
-          </svg>
+
+      {/* Section droite : actions (flex-1, alignées à droite) */}
+      <div className="flex items-center justify-end gap-2" style={{ flex: 1 }}>
+        <button onClick={onToggle} title={mod.enabled ? 'Désactiver' : 'Activer'}
+          className="relative flex-shrink-0"
+          style={{ width: 40, height: 22, borderRadius: 11, background: mod.enabled ? '#4B3FCF' : 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer' }}>
+          <span className="absolute transition-all duration-200" style={{ top: 3, left: mod.enabled ? 21 : 3, width: 16, height: 16, borderRadius: '50%', background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }} />
         </button>
-      )}
+        {confirm ? (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button onClick={() => { onDelete(); setConfirm(false) }} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(248,113,113)', background: 'rgba(200,50,50,0.15)', borderRadius: 7, padding: '3px 7px' }}>Suppr.</button>
+            <button onClick={() => setConfirm(false)} style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)', borderRadius: 7, padding: '3px 7px' }}>Ann.</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirm(true)}
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl transition-all duration-150"
+            style={{ color: 'rgba(255,255,255,0.2)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'rgb(248,113,113)'; e.currentTarget.style.background = 'rgba(200,50,50,0.12)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.2)'; e.currentTarget.style.background = 'transparent' }}>
+            <svg viewBox="0 0 24 24" fill="currentColor" width={16} height={16}>
+              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+            </svg>
+          </button>
+        )}
+      </div>
     </div>
   )
 }
