@@ -101,10 +101,11 @@ export const useStore = create<Store>()(
       addAccount: (username, uuid) => {
         const accounts = get().accounts
         const idx = accounts.findIndex((a) => a.uuid === uuid)
+        const unlimited = get().isPremium()
         const next =
           idx >= 0
             ? accounts.map((a, i) => (i === idx ? { username, uuid } : a))
-            : accounts.length < 2
+            : unlimited || accounts.length < 2
             ? [...accounts, { username, uuid }]
             : accounts
         set({ accounts: next, username, uuid })

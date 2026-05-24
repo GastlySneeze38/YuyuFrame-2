@@ -18,11 +18,11 @@ const PLANS = [
     features: [
       { label: 'Launcher Minecraft complet', ok: true },
       { label: 'Instances illimitées (locales)', ok: true },
-      { label: '2 comptes Minecraft', ok: true },
+      { label: '2 comptes Minecraft max', ok: true },
       { label: 'Gestion des mods', ok: true },
       { label: 'Console de jeu', ok: true },
+      { label: 'Comptes Minecraft illimités', ok: false },
       { label: 'Sync cloud', ok: false },
-      { label: 'Sauvegarde cloud', ok: false },
       { label: 'Support prioritaire', ok: false },
     ],
   },
@@ -37,11 +37,12 @@ const PLANS = [
     glowColor: 'rgba(75,63,207,0.08)',
     features: [
       { label: 'Tout ce qui est inclus dans Free', ok: true },
+      { label: 'Comptes Minecraft illimités', ok: true },
+      { label: 'Stats & analytics détaillées', ok: true },
       { label: 'Sync cloud (jusqu\'à 3 saves)', ok: true },
       { label: 'Jusqu\'à 4 instances synchronisées', ok: true },
       { label: 'Restauration cloud en un clic', ok: true },
       { label: 'Support prioritaire', ok: true },
-      { label: 'Sync 10 saves', ok: false },
       { label: '10 instances synchronisées', ok: false },
     ],
   },
@@ -56,6 +57,7 @@ const PLANS = [
     glowColor: 'rgba(245,158,11,0.06)',
     features: [
       { label: 'Tout ce qui est inclus dans Premium', ok: true },
+      { label: 'Comptes Minecraft illimités', ok: true },
       { label: 'Sync cloud (jusqu\'à 10 saves)', ok: true },
       { label: 'Jusqu\'à 10 instances synchronisées', ok: true },
       { label: 'Restauration cloud en un clic', ok: true },
@@ -368,7 +370,8 @@ export default function Plans() {
           </div>
           <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
             {[
-              { label: 'Comptes Minecraft', free: '2', premium: '2', ultimate: '2' },
+              { label: 'Comptes Minecraft', free: '2 max', premium: 'Illimités', ultimate: 'Illimités' },
+              { label: 'Stats & analytics', free: 'Basiques', premium: 'Avancées', ultimate: 'Avancées' },
               { label: 'Instances locales', free: 'Illimitées', premium: 'Illimitées', ultimate: 'Illimitées' },
               { label: 'Instances synchronisées', free: '—', premium: '3 avec saves / 4 sans', ultimate: '10' },
               { label: 'Saves synchronisées (total)', free: '—', premium: '3', ultimate: '10' },
