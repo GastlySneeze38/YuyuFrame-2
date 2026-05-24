@@ -1,6 +1,7 @@
 mod admin;
 mod auth;
 mod checkout;
+mod dev;
 mod health;
 mod lemon;
 mod stripe;
@@ -19,4 +20,5 @@ pub fn router() -> Router<AppState> {
         .merge(stripe::router())
         .merge(lemon::router())
         .merge(checkout::router())
+        .merge(dev::router())
 }

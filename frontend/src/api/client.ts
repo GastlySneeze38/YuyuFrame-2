@@ -57,6 +57,8 @@ export const api = {
     refreshPlan: () => invoke<YuyuPlanResp>('yuyu_refresh_plan'),
     createCheckout: (plan: string) =>
       invoke<YuyuCheckoutResp>('yuyu_create_checkout', { plan }),
+    devSimulatePayment: (plan: string) =>
+      invoke<YuyuPlanResp>('yuyu_dev_simulate_payment', { plan }),
   },
 
   auth: {
