@@ -261,11 +261,10 @@ export function ModsContent({ instance }: { instance: Instance }) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [modSearch, setModSearch] = useState('')
-  const [showLogos, setShowLogos] = useState(true)
   const [logoCache, setLogoCache] = useState<Record<string, string | null>>({})
 
   useEffect(() => {
-    if (!showLogos || mods.length === 0) return
+    if (mods.length === 0) return
     mods.forEach(async (mod) => {
       const key = displayName(mod.name)
       if (key in logoCache) return
@@ -276,7 +275,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
         setLogoCache((prev) => ({ ...prev, [key]: null }))
       }
     })
-  }, [showLogos, mods])
+  }, [mods])
 
   const loadMods = async () => {
     if (!instanceId) return
@@ -410,44 +409,24 @@ export function ModsContent({ instance }: { instance: Instance }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Sub-header: instance info + tabs + upload */}
+      {/* Sub-header: 3 zones — gauche/centre/droite */}
       <div
-        className="flex flex-shrink-0 items-center justify-between gap-4 px-6 py-3"
+        className="flex flex-shrink-0 items-center px-6 py-3"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
       >
-        <div className="flex gap-1">
-          {(['installed', 'browse'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className="rounded-lg px-4 py-1.5 text-xs font-semibold transition-all duration-150"
-              style={{
-                background: tab === t ? 'rgba(75,63,207,0.25)' : 'transparent',
-                color: tab === t ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
-                border: `1px solid ${tab === t ? 'rgba(75,63,207,0.5)' : 'transparent'}`,
-              }}
-            >
-              {t === 'installed'
-                ? `Installés (${mods.length})`
-                : isPlugin ? 'Parcourir les plugins' : 'Parcourir Modrinth'}
-            </button>
-          ))}
-          {tab === 'installed' && (
-            <button
-              onClick={() => setShowLogos((v) => !v)}
-              title={showLogos ? 'Masquer les logos' : 'Afficher les logos'}
-              className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all duration-150"
-              style={{
-                background: showLogos ? 'rgba(75,63,207,0.25)' : 'transparent',
-                color: showLogos ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
-                border: `1px solid ${showLogos ? 'rgba(75,63,207,0.5)' : 'rgba(255,255,255,0.08)'}`,
-              }}
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
-                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
-              </svg>
-            </button>
-          )}
+        {/* Gauche : tab Installés + badge mises à jour */}
+        <div className="flex flex-1 items-center gap-1">
+          <button
+            onClick={() => setTab('installed')}
+            className="rounded-lg px-4 py-1.5 text-xs font-semibold transition-all duration-150"
+            style={{
+              background: tab === 'installed' ? 'rgba(75,63,207,0.25)' : 'transparent',
+              color: tab === 'installed' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
+              border: `1px solid ${tab === 'installed' ? 'rgba(75,63,207,0.5)' : 'transparent'}`,
+            }}
+          >
+            {`Installés (${mods.length})`}
+          </button>
           {tab === 'installed' && updates.length > 0 && (
             <button
               onClick={handleUpdateAll}
@@ -469,32 +448,52 @@ export function ModsContent({ instance }: { instance: Instance }) {
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Centre : boutons d'ajout groupés */}
+        <div className="flex items-center" style={{ border: '1px solid rgba(75,63,207,0.35)', borderRadius: 10, overflow: 'hidden' }}>
+          <button
+            onClick={() => setTab('browse')}
+            className="flex items-center gap-1.5 font-semibold transition-all duration-150"
+            style={{
+              height: 32, paddingLeft: 14, paddingRight: 14, fontSize: 12, border: 'none',
+              borderRight: '1px solid rgba(75,63,207,0.35)',
+              background: tab === 'browse' ? 'rgba(75,63,207,0.25)' : 'transparent',
+              color: tab === 'browse' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.55)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { if (tab !== 'browse') e.currentTarget.style.background = 'rgba(75,63,207,0.12)' }}
+            onMouseLeave={(e) => { if (tab !== 'browse') e.currentTarget.style.background = 'transparent' }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
+              <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+            </svg>
+            {isPlugin ? 'Parcourir les plugins' : 'Parcourir Modrinth'}
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-1.5 font-semibold transition-all duration-150 active:scale-95"
+            style={{
+              height: 32, paddingLeft: 14, paddingRight: 14, fontSize: 12, border: 'none',
+              background: uploading ? 'rgba(40,38,65,0.7)' : 'rgba(75,63,207,0.3)',
+              color: uploading ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.85)',
+              cursor: uploading ? 'not-allowed' : 'pointer',
+            }}
+            onMouseEnter={(e) => { if (!uploading) e.currentTarget.style.background = 'rgba(75,63,207,0.5)' }}
+            onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.background = uploading ? 'rgba(40,38,65,0.7)' : 'rgba(75,63,207,0.3)' }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
+              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+            </svg>
+            {uploading ? 'Import...' : isPlugin ? 'Importer un plugin' : 'Importer un mod'}
+          </button>
+        </div>
+        <input ref={fileInputRef} type="file" accept=".jar" className="hidden" onChange={handleFileChange} />
+
+        {/* Droite : informations de l'instance */}
+        <div className="flex flex-1 justify-end">
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>
             {instance.name} · {mcVersion} · {loader}
           </span>
-          {tab === 'installed' && (
-            <>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="flex items-center gap-2 font-semibold transition-all duration-200 active:scale-95"
-                style={{
-                  height: 32, paddingLeft: 12, paddingRight: 12, borderRadius: 10, fontSize: 12,
-                  background: uploading ? 'rgba(40,38,65,0.7)' : '#4B3FCF',
-                  cursor: uploading ? 'not-allowed' : 'pointer',
-                }}
-                onMouseEnter={(e) => { if (!uploading) e.currentTarget.style.background = '#6155e8' }}
-                onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.background = '#4B3FCF' }}
-              >
-                <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}>
-                  <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                </svg>
-                {uploading ? 'Import...' : isPlugin ? 'Importer un plugin' : 'Importer un mod'}
-              </button>
-              <input ref={fileInputRef} type="file" accept=".jar" className="hidden" onChange={handleFileChange} />
-            </>
-          )}
         </div>
       </div>
 
@@ -508,7 +507,6 @@ export function ModsContent({ instance }: { instance: Instance }) {
             isPlugin={isPlugin}
             modSearch={modSearch}
             onModSearch={setModSearch}
-            showLogos={showLogos}
             logoCache={logoCache}
             versionMap={versionMap}
             updates={updates}
@@ -584,78 +582,10 @@ export default function Mods() {
   )
 }
 
-// ── Updates panel ────────────────────────────────────────────────────────────
-
-function UpdatesPanel({ updates, updatingMods, updatingAll, onUpdate, onUpdateAll }: {
-  updates: ModUpdate[]
-  updatingMods: Set<string>
-  updatingAll: boolean
-  onUpdate: (u: ModUpdate) => void
-  onUpdateAll: () => void
-}) {
-  return (
-    <div className="mb-3 overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(250,204,21,0.18)', background: 'rgba(250,204,21,0.04)' }}>
-      <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid rgba(250,204,21,0.1)' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(250,204,21,0.7)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          {updates.length} mise{updates.length > 1 ? 's' : ''} à jour disponible{updates.length > 1 ? 's' : ''}
-        </span>
-        <button
-          onClick={onUpdateAll}
-          disabled={updatingAll}
-          style={{
-            fontSize: 11, fontWeight: 700, height: 26, padding: '0 12px', borderRadius: 8,
-            background: updatingAll ? 'rgba(255,255,255,0.04)' : 'rgba(250,204,21,0.15)',
-            border: '1px solid rgba(250,204,21,0.28)',
-            color: updatingAll ? 'rgba(255,255,255,0.25)' : 'rgba(250,204,21,0.9)',
-            cursor: updatingAll ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {updatingAll ? 'Mise à jour...' : 'Tout mettre à jour'}
-        </button>
-      </div>
-      {updates.map((u, i) => {
-        const busy = updatingMods.has(u.mod.sha1) || updatingAll
-        const name = u.modrinthName || displayName(u.mod.name)
-        return (
-          <div
-            key={u.mod.sha1}
-            className="flex items-center gap-3 px-4 py-2.5"
-            style={{ borderBottom: i < updates.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
-          >
-            <p className="min-w-0 flex-1 truncate font-semibold" style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
-              {name}
-            </p>
-            <div className="flex flex-shrink-0 items-center gap-1.5" style={{ fontSize: 10 }}>
-              <span style={{ color: 'rgba(255,255,255,0.28)' }}>{u.currentVersion}</span>
-              <svg viewBox="0 0 24 24" fill="currentColor" width={10} height={10} style={{ color: 'rgba(250,204,21,0.45)' }}>
-                <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z" />
-              </svg>
-              <span style={{ color: 'rgba(250,204,21,0.85)', fontWeight: 700 }}>{u.newVersion}</span>
-            </div>
-            <button
-              onClick={() => onUpdate(u)}
-              disabled={busy}
-              style={{
-                fontSize: 10, fontWeight: 700, height: 24, padding: '0 10px', borderRadius: 7, flexShrink: 0,
-                background: busy ? 'rgba(255,255,255,0.04)' : 'rgba(250,204,21,0.12)',
-                border: '1px solid rgba(250,204,21,0.22)',
-                color: busy ? 'rgba(255,255,255,0.2)' : 'rgba(250,204,21,0.85)',
-                cursor: busy ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {updatingMods.has(u.mod.sha1) ? '...' : 'Mettre à jour'}
-            </button>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 // ── Installed tab ─────────────────────────────────────────────────────────────
 
 function InstalledTab({
-  mods, loading, error, isPlugin, modSearch, onModSearch, showLogos, logoCache, versionMap,
+  mods, loading, error, isPlugin, modSearch, onModSearch, logoCache, versionMap,
   updates, updatingMods, updatingAll, onReload, onToggle, onDelete, onUpdateMod,
 }: {
   mods: Mod[]
@@ -664,7 +594,6 @@ function InstalledTab({
   isPlugin: boolean
   modSearch: string
   onModSearch: (v: string) => void
-  showLogos: boolean
   logoCache: Record<string, string | null>
   versionMap: Record<string, ModrinthInfo>
   updates: ModUpdate[]
@@ -754,8 +683,7 @@ function InstalledTab({
               modrinthName={versionMap[mod.sha1]?.modrinthName || null}
               update={update}
               updating={updatingMods.has(mod.sha1) || updatingAll}
-              showLogos={showLogos}
-              logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
+              logoUrl={logoCache[displayName(mod.name)] ?? null}
               onToggle={() => onToggle(mod)}
               onDelete={() => onDelete(mod.name)}
               onUpdate={() => update && onUpdateMod(update)}
@@ -836,13 +764,12 @@ function BrowseTab({
 
 // ── Mod row ───────────────────────────────────────────────────────────────────
 
-function ModRow({ mod, version, modrinthName, update, updating, showLogos, logoUrl, onToggle, onDelete, onUpdate }: {
+function ModRow({ mod, version, modrinthName, update, updating, logoUrl, onToggle, onDelete, onUpdate }: {
   mod: Mod
   version: string | null
   modrinthName: string | null
   update: ModUpdate | null
   updating: boolean
-  showLogos: boolean
   logoUrl: string | null
   onToggle: () => void
   onDelete: () => void
@@ -857,7 +784,7 @@ function ModRow({ mod, version, modrinthName, update, updating, showLogos, logoU
       {/* Section gauche : icône + nom (flex-1) */}
       <div className="flex items-center gap-3 min-w-0" style={{ flex: 1 }}>
         <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, overflow: 'hidden', background: mod.enabled ? 'rgba(75,63,207,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {showLogos && logoUrl
+          {logoUrl
             ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : <PlugIcon size={18} color={mod.enabled ? 'rgba(120,110,230,0.8)' : 'rgba(255,255,255,0.2)'} />
           }
