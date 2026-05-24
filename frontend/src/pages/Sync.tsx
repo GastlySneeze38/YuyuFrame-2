@@ -111,7 +111,7 @@ function SaveToggle({
 // ── Instances sync card ───────────────────────────────────────────────────────
 
 function InstancesSyncCard() {
-  const { instances, yuyuToken, isPremium, isUltimate } = useStore()
+  const { instances, yuyuToken, isPremium, isUltimate, addInstance } = useStore()
   const userIsPremium = isPremium()
   const userIsUltimate = isUltimate()
 
@@ -274,6 +274,22 @@ function InstancesSyncCard() {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const handleRestore = async (ci: SyncInstance) => {
+    setPullingId(ci.id)
+    setError('')
+    try {
+      const newInstance = await api.instances.create(ci.instance_name, ci.mc_version, ci.loader, ci.ram_mb)
+      addInstance(newInstance)
+      await api.sync.pull(ci.id, newInstance.id)
+      setSelectedLocalId(newInstance.id)
+      notify(`Instance "${ci.instance_name}" restaurée depuis le cloud !`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPullingId(null)
     }
   }
 
@@ -494,6 +510,8 @@ function InstancesSyncCard() {
               const isForSelected = selectedLocal?.name === ci.instance_name
               const isPulling = pullingId === ci.id
               const isDeleting = deletingId === ci.id
+              const hasLocalMatch = instances.some((i) => i.name === ci.instance_name)
+              const canRestore = !hasLocalMatch && ci.has_data
               return (
                 <div
                   key={ci.id}
@@ -532,6 +550,29 @@ function InstancesSyncCard() {
                   </div>
 
                   <div className="flex items-center gap-1.5">
+                    {canRestore ? (
+                      <button
+                        onClick={() => handleRestore(ci)}
+                        disabled={isPulling || pushing}
+                        title="Créer l'instance localement et tirer les données"
+                        className="flex items-center gap-1.5 font-semibold transition-all duration-150"
+                        style={{
+                          height: 30, padding: '0 12px', borderRadius: 9, fontSize: 12,
+                          background: isPulling ? 'rgba(40,38,65,0.7)' : 'rgba(74,222,128,0.12)',
+                          color: (isPulling || pushing) ? 'rgba(255,255,255,0.2)' : 'rgba(74,222,128,0.85)',
+                          cursor: (isPulling || pushing) ? 'not-allowed' : 'pointer',
+                          border: '1px solid rgba(74,222,128,0.2)',
+                        }}
+                        onMouseEnter={(e) => { if (!isPulling && !pushing) e.currentTarget.style.background = 'rgba(74,222,128,0.2)' }}
+                        onMouseLeave={(e) => { if (!isPulling && !pushing) e.currentTarget.style.background = 'rgba(74,222,128,0.12)' }}
+                      >
+                        {isPulling
+                          ? <span className="h-3 w-3 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'white' }} />
+                          : <svg viewBox="0 0 24 24" fill="currentColor" width={12} height={12}><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z" style={{ transform: 'scaleY(-1)', transformOrigin: 'center' }} /></svg>
+                        }
+                        Restaurer
+                      </button>
+                    ) : (
                     <button
                       onClick={() => handlePull(ci.id)}
                       disabled={isPulling || !ci.has_data || !selectedLocalId || pushing}
@@ -553,6 +594,7 @@ function InstancesSyncCard() {
                       }
                       Tirer
                     </button>
+                    )}
 
                     <button
                       onClick={() => handleDelete(ci.id)}
