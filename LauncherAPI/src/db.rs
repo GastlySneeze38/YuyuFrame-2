@@ -9,6 +9,12 @@ pub fn init(conn: &Connection) -> Result<()> {
 
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
+         CREATE TABLE IF NOT EXISTS webhook_events (
+             event_id     TEXT    PRIMARY KEY,
+             processor    TEXT    NOT NULL,
+             event_type   TEXT    NOT NULL,
+             processed_at INTEGER NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS users (
              id              INTEGER PRIMARY KEY AUTOINCREMENT,
              username        TEXT    UNIQUE NOT NULL,
@@ -141,6 +147,32 @@ pub fn set_user_plan(
     conn.execute(
         "UPDATE users SET plan = ?1, plan_expires_at = ?2 WHERE id = ?3",
         params![plan, expires_at, user_id],
+    )?;
+    Ok(())
+}
+
+// ── Webhook idempotency ────────────────────────────────────────────────────────
+
+pub fn webhook_event_exists(conn: &Connection, event_id: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM webhook_events WHERE event_id = ?1",
+        params![event_id],
+        |r| r.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+pub fn insert_webhook_event(
+    conn: &Connection,
+    event_id: &str,
+    processor: &str,
+    event_type: &str,
+) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT OR IGNORE INTO webhook_events (event_id, processor, event_type, processed_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![event_id, processor, event_type, now],
     )?;
     Ok(())
 }

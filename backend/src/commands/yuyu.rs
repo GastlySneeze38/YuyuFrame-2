@@ -29,6 +29,11 @@ pub struct PlanResp {
 }
 
 #[derive(Serialize)]
+pub struct CheckoutResp {
+    pub checkout_url: String,
+}
+
+#[derive(Serialize)]
 pub struct AccountInfo {
     pub mc_username: String,
     pub mc_uuid: String,
@@ -241,6 +246,45 @@ pub async fn yuyu_refresh_plan(state: tauri::State<'_, SharedState>) -> Result<P
     }
 
     Ok(PlanResp { plan: data.plan, plan_expires_at: data.plan_expires_at })
+}
+
+// ── Checkout Lemon Squeezy ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn yuyu_create_checkout(
+    state: tauri::State<'_, SharedState>,
+    plan: String,
+) -> Result<CheckoutResp, String> {
+    let token = {
+        let s = state.read().await;
+        s.yuyu_session
+            .as_ref()
+            .ok_or_else(|| "Non connecté à YuyuFrame".to_string())?
+            .token
+            .clone()
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/payments/create-checkout", api_base()))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "plan": plan }))
+        .send()
+        .await
+        .map_err(|e| format!("Serveur inaccessible : {e}"))?;
+
+    if !resp.status().is_success() {
+        let msg = resp.text().await.unwrap_or_default();
+        return Err(msg);
+    }
+
+    #[derive(Deserialize)]
+    struct ApiCheckoutResp {
+        checkout_url: String,
+    }
+
+    let data: ApiCheckoutResp = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(CheckoutResp { checkout_url: data.checkout_url })
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────

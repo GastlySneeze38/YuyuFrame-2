@@ -20,6 +20,10 @@ export interface YuyuPlanResp {
   plan_expires_at: number | null
 }
 
+export interface YuyuCheckoutResp {
+  checkout_url: string
+}
+
 export interface McAccountInfo {
   mc_username: string
   mc_uuid: string
@@ -51,6 +55,8 @@ export const api = {
       invoke<YuyuLoginResp>('yuyu_login', { username, password }),
     logout: () => invoke<void>('yuyu_logout'),
     refreshPlan: () => invoke<YuyuPlanResp>('yuyu_refresh_plan'),
+    createCheckout: (plan: string) =>
+      invoke<YuyuCheckoutResp>('yuyu_create_checkout', { plan }),
   },
 
   auth: {
