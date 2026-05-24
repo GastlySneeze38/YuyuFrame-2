@@ -274,7 +274,7 @@ pub async fn download_and_launch(
 
     let mut child = tokio::process::Command::new(&java)
         .args(&args)
-        .current_dir(&mc_dir)
+        .current_dir(game_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())

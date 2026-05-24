@@ -37,15 +37,8 @@ fn write_meta(id: &str, name: &str, mc_version: &str, loader: &str, ram_mb: u32)
     }
 }
 
-fn yuyu_dir() -> PathBuf {
-    minecraft_dir()
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
 pub fn instance_dir(id: &str) -> PathBuf {
-    yuyu_dir().join("instances").join(id)
+    minecraft_dir().join("instances").join(id)
 }
 
 pub fn instance_mods_dir(id: &str) -> PathBuf {
@@ -92,7 +85,7 @@ pub async fn instance_create(
         return Err("Le nom de l'instance est requis".into());
     }
     let id = gen_id();
-    tokio::fs::create_dir_all(instance_mods_dir(&id))
+    tokio::fs::create_dir_all(instance_dir(&id))
         .await
         .map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
@@ -180,7 +173,7 @@ pub async fn instance_startup_sync(
     let db_rows = db::instance_list(&db, uid).map_err(|e| e.to_string())?;
     let db_ids: HashSet<String> = db_rows.iter().map(|r| r.id.clone()).collect();
 
-    let instances_root = yuyu_dir().join("instances");
+    let instances_root = minecraft_dir().join("instances");
     if !instances_root.is_dir() {
         let _ = std::fs::create_dir_all(&instances_root);
         return Ok(());
