@@ -58,6 +58,9 @@ launcher.db
 # ── YuyuFrame data ──
 session.json
 
+# ── Ancien launcher Java ──
+Old_YuyuFrame/
+
 # ── Secrets ──
 .env
 !.env.example
