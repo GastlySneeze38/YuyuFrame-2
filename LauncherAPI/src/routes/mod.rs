@@ -1,6 +1,7 @@
 mod admin;
 mod auth;
 mod health;
+mod stripe;
 mod sync;
 
 use axum::Router;
@@ -13,4 +14,5 @@ pub fn router() -> Router<AppState> {
         .merge(auth::router())
         .merge(sync::router())
         .merge(admin::router())
+        .merge(stripe::router())
 }

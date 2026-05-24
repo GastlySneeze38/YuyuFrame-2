@@ -74,6 +74,7 @@ pub fn run() {
             commands::yuyu::yuyu_register,
             commands::yuyu::yuyu_login,
             commands::yuyu::yuyu_logout,
+            commands::yuyu::yuyu_refresh_plan,
             commands::auth::auth_start_device,
             commands::auth::auth_poll,
             commands::auth::auth_status,

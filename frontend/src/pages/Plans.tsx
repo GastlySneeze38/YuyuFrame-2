@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
+import type { YuyuPlan } from '@/stores/useStore'
 
 const PLANS = [
   {
@@ -63,9 +66,28 @@ const PLANS = [
 
 export default function Plans() {
   const navigate = useNavigate()
-  const { yuyuPlan, yuyuUsername, isPremium, isUltimate } = useStore()
+  const { yuyuPlanExpiresAt, yuyuUsername, isPremium, isUltimate, setYuyuPlan } = useStore()
 
   const effectivePlan = isUltimate() ? 'ultimate' : isPremium() ? 'premium' : 'free'
+
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [upgradeTarget, setUpgradeTarget] = useState<string | null>(null)
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    setRefreshMsg(null)
+    try {
+      const resp = await api.yuyu.refreshPlan()
+      setYuyuPlan(resp.plan as YuyuPlan, resp.plan_expires_at)
+      setRefreshMsg({ ok: true, text: `Plan mis à jour : ${resp.plan}` })
+    } catch (e) {
+      setRefreshMsg({ ok: false, text: 'Impossible de contacter le serveur' })
+    } finally {
+      setRefreshing(false)
+      setTimeout(() => setRefreshMsg(null), 4000)
+    }
+  }
 
   return (
     <div
@@ -98,18 +120,68 @@ export default function Plans() {
             </p>
           </div>
 
-          {/* Current plan badge */}
-          <div style={{ width: 100 }} className="flex justify-end">
+          {/* Current plan badge + refresh */}
+          <div style={{ width: 100 }} className="flex flex-col items-end gap-2">
             {yuyuUsername && (
-              <div
-                className="flex flex-col items-end gap-0.5"
-              >
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', fontWeight: 500 }}>Votre plan</span>
-                <PlanBadge plan={effectivePlan} />
-              </div>
+              <>
+                <div className="flex flex-col items-end gap-0.5">
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', fontWeight: 500 }}>Votre plan</span>
+                  <PlanBadge plan={effectivePlan} />
+                </div>
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  className="flex items-center gap-1.5 transition-colors duration-150"
+                  style={{ fontSize: 10, color: refreshing ? 'rgba(255,255,255,0.2)' : 'rgba(75,63,207,0.7)', fontWeight: 600, cursor: refreshing ? 'not-allowed' : 'pointer' }}
+                  onMouseEnter={(e) => { if (!refreshing) (e.currentTarget as HTMLElement).style.color = '#818cf8' }}
+                  onMouseLeave={(e) => { if (!refreshing) (e.currentTarget as HTMLElement).style.color = 'rgba(75,63,207,0.7)' }}
+                >
+                  {refreshing ? (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 flex-shrink-0" style={{ borderColor: 'rgba(255,255,255,0.1)', borderTopColor: 'rgba(75,63,207,0.6)' }} />
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="currentColor" width={10} height={10}>
+                      <path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
+                    </svg>
+                  )}
+                  Rafraîchir
+                </button>
+              </>
             )}
           </div>
         </div>
+
+        {/* Refresh feedback */}
+        {refreshMsg && (
+          <div
+            className="flex items-center gap-2 rounded-xl px-4 py-2.5"
+            style={{
+              background: refreshMsg.ok ? 'rgba(74,222,128,0.07)' : 'rgba(200,50,50,0.1)',
+              border: `1px solid ${refreshMsg.ok ? 'rgba(74,222,128,0.2)' : 'rgba(200,50,50,0.2)'}`,
+            }}
+          >
+            <span style={{ fontSize: 12, color: refreshMsg.ok ? 'rgb(74,222,128)' : 'rgb(248,113,113)', fontWeight: 600 }}>
+              {refreshMsg.text}
+            </span>
+          </div>
+        )}
+
+        {/* Plan expiry warning */}
+        {yuyuPlanExpiresAt && effectivePlan !== 'free' && (
+          <div
+            className="flex items-center gap-3 rounded-2xl px-5 py-3"
+            style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}
+          >
+            <svg viewBox="0 0 24 24" fill="#f59e0b" width={16} height={16}>
+              <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+            </svg>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>
+              Votre abonnement <span style={{ color: '#f59e0b', fontWeight: 600 }}>{effectivePlan}</span> expire le{' '}
+              <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>
+                {new Date(yuyuPlanExpiresAt * 1000).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+              </span>.
+            </p>
+          </div>
+        )}
 
         {/* Free notice banner */}
         <div
@@ -227,10 +299,19 @@ export default function Plans() {
                       border: isCurrent
                         ? `1px solid ${plan.price ? plan.borderColor : 'rgba(255,255,255,0.1)'}`
                         : 'none',
-                      cursor: isCurrent ? 'default' : 'pointer',
+                      cursor: isCurrent ? 'default' : (plan.price ? 'pointer' : 'default'),
                       fontWeight: 700,
                     }}
-                    disabled={isCurrent}
+                    disabled={isCurrent || !plan.price}
+                    onClick={() => { if (!isCurrent && plan.price) setUpgradeTarget(plan.id) }}
+                    onMouseEnter={(e) => {
+                      if (!isCurrent && plan.price) {
+                        (e.currentTarget as HTMLElement).style.filter = 'brightness(1.1)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.filter = ''
+                    }}
                   >
                     {isCurrent ? 'Plan actuel' : plan.price ? `Passer à ${plan.name}` : 'Plan gratuit'}
                   </button>
@@ -284,9 +365,139 @@ export default function Plans() {
         </div>
 
       </div>
+
+      {/* Upgrade modal */}
+      {upgradeTarget && (
+        <UpgradeModal
+          plan={upgradeTarget}
+          onClose={() => setUpgradeTarget(null)}
+          onRefresh={async () => {
+            setUpgradeTarget(null)
+            await handleRefresh()
+          }}
+          refreshing={refreshing}
+        />
+      )}
     </div>
   )
 }
+
+// ── Upgrade modal ─────────────────────────────────────────────────────────────
+
+function UpgradeModal({
+  plan,
+  onClose,
+  onRefresh,
+  refreshing,
+}: {
+  plan: string
+  onClose: () => void
+  onRefresh: () => void
+  refreshing: boolean
+}) {
+  const planMeta = PLANS.find((p) => p.id === plan)!
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="flex flex-col gap-6 rounded-2xl p-8 w-full max-w-sm relative"
+        style={{
+          background: '#111118',
+          border: `1px solid ${planMeta.borderColor}`,
+          boxShadow: `0 0 60px ${planMeta.glowColor}, 0 24px 48px rgba(0,0,0,0.6)`,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close */}
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 flex items-center justify-center rounded-lg transition-all duration-150"
+          style={{ width: 28, height: 28, color: 'rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.04)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.25)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" width={14} height={14}>
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+          </svg>
+        </button>
+
+        {/* Icon + title */}
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div
+            className="flex items-center justify-center rounded-2xl"
+            style={{ width: 56, height: 56, background: planMeta.badgeBg, border: `1px solid ${planMeta.borderColor}` }}
+          >
+            <PlanIcon plan={plan} color={planMeta.color} />
+          </div>
+          <div>
+            <h2 className="font-black text-white" style={{ fontSize: 20, letterSpacing: '-0.01em' }}>
+              Plan {planMeta.name}
+            </h2>
+            <p style={{ fontSize: 13, color: planMeta.color, fontWeight: 700, marginTop: 2 }}>
+              {planMeta.price}€ / mois
+            </p>
+          </div>
+        </div>
+
+        {/* Coming soon notice */}
+        <div
+          className="flex flex-col gap-2 rounded-xl p-4"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
+        >
+          <div className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" fill="#818cf8" width={14} height={14} style={{ flexShrink: 0 }}>
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+            </svg>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.7)' }}>
+              Abonnements bientôt disponibles
+            </span>
+          </div>
+          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.6 }}>
+            La facturation sera activée lors du lancement officiel de YuyuFrame. Si votre plan a déjà été activé manuellement, cliquez sur <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Rafraîchir mon plan</span> pour mettre à jour votre statut.
+          </p>
+        </div>
+
+        {/* Refresh button */}
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center justify-center gap-2 w-full rounded-xl font-bold text-white transition-all duration-150 active:scale-95"
+          style={{
+            height: 44, fontSize: 13,
+            background: refreshing ? 'rgba(40,38,65,0.7)' : planMeta.color === '#818cf8' ? '#4B3FCF' : 'rgba(245,158,11,0.9)',
+            color: refreshing ? 'rgba(255,255,255,0.3)' : planMeta.color === '#818cf8' ? 'white' : '#09090D',
+            cursor: refreshing ? 'not-allowed' : 'pointer',
+            boxShadow: refreshing ? 'none' : `0 4px 20px ${planMeta.glowColor}`,
+          }}
+          onMouseEnter={(e) => {
+            if (!refreshing) (e.currentTarget as HTMLElement).style.filter = 'brightness(1.1)'
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.filter = ''
+          }}
+        >
+          {refreshing ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 flex-shrink-0" style={{ borderColor: 'rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.5)' }} />
+          ) : (
+            <svg viewBox="0 0 24 24" fill="currentColor" width={14} height={14}>
+              <path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
+            </svg>
+          )}
+          {refreshing ? 'Vérification...' : 'Rafraîchir mon plan'}
+        </button>
+
+        <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)', textAlign: 'center', lineHeight: 1.5 }}>
+          Si votre plan vient d'être activé par un administrateur,<br />le rafraîchissement le détectera immédiatement.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function PlanBadge({ plan }: { plan: string }) {
   if (plan === 'ultimate') {

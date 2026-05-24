@@ -15,6 +15,11 @@ export interface YuyuLoginResp {
   accounts: McAccountInfo[]
 }
 
+export interface YuyuPlanResp {
+  plan: string
+  plan_expires_at: number | null
+}
+
 export interface McAccountInfo {
   mc_username: string
   mc_uuid: string
@@ -45,6 +50,7 @@ export const api = {
     login: (username: string, password: string) =>
       invoke<YuyuLoginResp>('yuyu_login', { username, password }),
     logout: () => invoke<void>('yuyu_logout'),
+    refreshPlan: () => invoke<YuyuPlanResp>('yuyu_refresh_plan'),
   },
 
   auth: {

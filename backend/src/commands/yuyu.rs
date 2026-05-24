@@ -17,7 +17,15 @@ pub struct StatusResp {
 pub struct LoginResp {
     pub token: String,
     pub username: String,
+    pub plan: String,
+    pub plan_expires_at: Option<i64>,
     pub accounts: Vec<AccountInfo>,
+}
+
+#[derive(Serialize)]
+pub struct PlanResp {
+    pub plan: String,
+    pub plan_expires_at: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -71,7 +79,7 @@ pub async fn yuyu_register(
     let data: ApiAuthResponse = resp.json().await.map_err(|e| e.to_string())?;
     save_session(&state, data.user_id, &data.username, &data.token, &data.plan, data.plan_expires_at).await?;
 
-    Ok(LoginResp { token: data.token, username: data.username, accounts: vec![] })
+    Ok(LoginResp { token: data.token, username: data.username, plan: data.plan, plan_expires_at: data.plan_expires_at, accounts: vec![] })
 }
 
 #[tauri::command]
@@ -167,7 +175,7 @@ pub async fn yuyu_login(
 
     state.write().await.session = active_session;
 
-    Ok(LoginResp { token: data.token, username: data.username, accounts })
+    Ok(LoginResp { token: data.token, username: data.username, plan: data.plan, plan_expires_at: data.plan_expires_at, accounts })
 }
 
 #[tauri::command]
@@ -181,6 +189,58 @@ pub async fn yuyu_logout(state: tauri::State<'_, SharedState>) -> Result<(), Str
     w.yuyu_session = None;
     w.session = None;
     Ok(())
+}
+
+// ── Plan refresh ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn yuyu_refresh_plan(state: tauri::State<'_, SharedState>) -> Result<PlanResp, String> {
+    let token = {
+        let s = state.read().await;
+        s.yuyu_session
+            .as_ref()
+            .ok_or_else(|| "Non connecté à YuyuFrame".to_string())?
+            .token
+            .clone()
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{}/auth/me", api_base()))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Serveur inaccessible : {e}"))?;
+
+    if !resp.status().is_success() {
+        let msg = resp.text().await.unwrap_or_default();
+        return Err(msg);
+    }
+
+    #[derive(Deserialize)]
+    struct MeResp {
+        plan: String,
+        plan_expires_at: Option<i64>,
+    }
+
+    let data: MeResp = resp.json().await.map_err(|e| e.to_string())?;
+
+    {
+        let s = state.read().await;
+        let conn = s.db.lock().await;
+        db::update_yuyu_plan(&conn, &data.plan, data.plan_expires_at)
+            .map_err(|e| e.to_string())?;
+    }
+
+    {
+        let mut s = state.write().await;
+        if let Some(session) = s.yuyu_session.as_mut() {
+            session.plan = data.plan.clone();
+            session.plan_expires_at = data.plan_expires_at;
+        }
+    }
+
+    Ok(PlanResp { plan: data.plan, plan_expires_at: data.plan_expires_at })
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────

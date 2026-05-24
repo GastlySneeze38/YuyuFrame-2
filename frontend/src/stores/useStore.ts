@@ -11,6 +11,7 @@ interface Store {
   yuyuPlan: YuyuPlan
   yuyuPlanExpiresAt: number | null
   setYuyuSession: (token: string, username: string, plan: YuyuPlan, planExpiresAt: number | null) => void
+  setYuyuPlan: (plan: YuyuPlan, planExpiresAt: number | null) => void
   clearYuyuSession: () => void
   isPremium: () => boolean
   isUltimate: () => boolean
@@ -72,6 +73,8 @@ export const useStore = create<Store>()(
       yuyuPlanExpiresAt: null,
       setYuyuSession: (token, username, plan, planExpiresAt) =>
         set({ yuyuToken: token, yuyuUsername: username, yuyuPlan: plan, yuyuPlanExpiresAt: planExpiresAt }),
+      setYuyuPlan: (plan, planExpiresAt) =>
+        set({ yuyuPlan: plan, yuyuPlanExpiresAt: planExpiresAt }),
       clearYuyuSession: () =>
         set({ yuyuToken: null, yuyuUsername: null, yuyuPlan: 'free', yuyuPlanExpiresAt: null, accounts: [], username: null, uuid: null }),
       isPremium: () => {

@@ -125,6 +125,14 @@ pub fn delete_yuyu_jwt(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+pub fn update_yuyu_plan(conn: &Connection, plan: &str, plan_expires_at: Option<i64>) -> Result<()> {
+    conn.execute(
+        "UPDATE yuyu_session SET plan = ?1, plan_expires_at = ?2 WHERE id = 1",
+        params![plan, plan_expires_at],
+    )?;
+    Ok(())
+}
+
 // ── Minecraft sessions ─────────────────────────────────────────────────────────
 
 pub fn upsert_mc_session(
