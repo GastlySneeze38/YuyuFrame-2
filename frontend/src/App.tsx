@@ -10,6 +10,7 @@ import Information from '@/pages/Information'
 import YuyuLogin from '@/pages/YuyuLogin'
 import Console from '@/pages/Console'
 import Sync from '@/pages/Sync'
+import Plans from '@/pages/Plans'
 import { useStore } from '@/stores/useStore'
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -51,6 +52,7 @@ export default function App() {
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/information" element={<Information />} />
                   <Route path="/sync" element={<Sync />} />
+                  <Route path="/plans" element={<Plans />} />
                 </Routes>
               </AuthGuard>
             }

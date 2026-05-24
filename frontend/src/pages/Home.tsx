@@ -402,6 +402,9 @@ export default function Home() {
             <NavLink label="Compte" onClick={() => navigate('/login')}>
               <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" /></svg>
             </NavLink>
+            <NavLink label="Plans" onClick={() => navigate('/plans')}>
+              <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" /></svg>
+            </NavLink>
             <NavLink label="Infos" onClick={() => navigate('/information')}>
               <svg viewBox="0 0 24 24" fill="currentColor" width={13} height={13}><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" /></svg>
             </NavLink>
