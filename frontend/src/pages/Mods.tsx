@@ -490,7 +490,7 @@ function InstalledTab({
       {filtered.length > 0 && (
         <div
           className="flex items-center rounded-2xl px-4 py-1.5"
-          style={{ position: 'sticky', top: -12, zIndex: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', marginBottom: 8 }}
+          style={{ position: 'sticky', top: -12, zIndex: 10, background: '#09090D', border: '1px solid rgba(255,255,255,0.08)', marginBottom: 8 }}
         >
           <div className="flex items-center gap-3 min-w-0" style={{ flex: 1 }}>
             <div style={{ width: 36, flexShrink: 0 }} />
