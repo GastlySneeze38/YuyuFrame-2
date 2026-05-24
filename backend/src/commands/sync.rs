@@ -156,6 +156,11 @@ fn build_instance_zip_with_progress(
     // Collecte des fichiers à compresser
     let mut files: Vec<(PathBuf, String)> = Vec::new();
 
+    let mods_dir = inst_dir.join("mods");
+    if mods_dir.is_dir() {
+        collect_files(&mods_dir, &mods_dir, "mods", &mut files)?;
+    }
+
     let config_dir = inst_dir.join("config");
     if config_dir.is_dir() {
         collect_files(&config_dir, &config_dir, "config", &mut files)?;

@@ -13,6 +13,7 @@ import Sync from '@/pages/Sync'
 import Plans from '@/pages/Plans'
 import Stats from '@/pages/Stats'
 import { useStore } from '@/stores/useStore'
+import { api } from '@/api/client'
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -28,7 +29,14 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { brightness } = useStore()
+  const { brightness, instanceSyncMode, setInstances } = useStore()
+
+  useEffect(() => {
+    api.instances.startupSync(instanceSyncMode)
+      .then(() => api.instances.list())
+      .then(setInstances)
+      .catch(() => {})
+  }, [])
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-primary">

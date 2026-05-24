@@ -54,6 +54,9 @@ interface Store {
   brightness: number
   setBrightness: (b: number) => void
 
+  instanceSyncMode: 'db_wins' | 'disk_wins'
+  setInstanceSyncMode: (mode: 'db_wins' | 'disk_wins') => void
+
   // ── Game state ─────────────────────────────────────────────────────────────
   gameRunning: boolean
   setGameRunning: (r: boolean) => void
@@ -159,6 +162,9 @@ export const useStore = create<Store>()(
       brightness: 100,
       setBrightness: (brightness) => set({ brightness }),
 
+      instanceSyncMode: 'db_wins',
+      setInstanceSyncMode: (instanceSyncMode) => set({ instanceSyncMode }),
+
       // Game
       gameRunning: false,
       setGameRunning: (gameRunning) => set({ gameRunning }),
@@ -174,6 +180,7 @@ export const useStore = create<Store>()(
         defaultRam: s.defaultRam,
         closeOnLaunch: s.closeOnLaunch,
         brightness: s.brightness,
+        instanceSyncMode: s.instanceSyncMode,
         username: s.username,
         uuid: s.uuid,
         lastSession: s.lastSession,

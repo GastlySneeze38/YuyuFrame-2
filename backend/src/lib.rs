@@ -97,6 +97,7 @@ pub fn run() {
             commands::instances::instance_delete,
             commands::instances::instance_update,
             commands::instances::instance_toggle_favorite,
+            commands::instances::instance_startup_sync,
             commands::sync::sync_list_instances,
             commands::sync::sync_list_saves,
             commands::sync::sync_push_instance,

@@ -15,6 +15,28 @@ pub struct Instance {
     pub favorite: bool,
 }
 
+#[derive(Serialize, Deserialize)]
+struct InstanceMeta {
+    id: String,
+    name: String,
+    mc_version: String,
+    loader: String,
+    ram_mb: u32,
+}
+
+fn write_meta(id: &str, name: &str, mc_version: &str, loader: &str, ram_mb: u32) {
+    let meta = InstanceMeta {
+        id: id.to_string(),
+        name: name.to_string(),
+        mc_version: mc_version.to_string(),
+        loader: loader.to_string(),
+        ram_mb,
+    };
+    if let Ok(json) = serde_json::to_string_pretty(&meta) {
+        let _ = std::fs::write(instance_dir(id).join("meta.json"), json);
+    }
+}
+
 fn yuyu_dir() -> PathBuf {
     minecraft_dir()
         .parent()
@@ -74,6 +96,7 @@ pub async fn instance_create(
         .await
         .map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
+    write_meta(&id, &name, &mc_version, &loader, ram_mb);
     let s = state.read().await;
     let uid = user_id(&s);
     let db = s.db.lock().await;
@@ -133,8 +156,69 @@ pub async fn instance_update(
     let db = s.db.lock().await;
     db::instance_update(&db, &id, uid, &name, &mc_version, &loader, ram_mb)
         .map_err(|e| e.to_string())?;
+    write_meta(&id, &name, &mc_version, &loader, ram_mb);
     let row = db::instance_get(&db, &id, uid)
         .map_err(|e| e.to_string())?
         .ok_or("Instance introuvable")?;
     Ok(row_to_instance(row))
+}
+
+/// Synchronise la DB avec les dossiers réels au démarrage.
+/// mode = "db_wins"   → supprime les dossiers orphelins sur le disque
+/// mode = "disk_wins" → importe en DB les dossiers qui ont un meta.json
+#[tauri::command]
+pub async fn instance_startup_sync(
+    state: tauri::State<'_, SharedState>,
+    mode: String,
+) -> Result<(), String> {
+    use std::collections::HashSet;
+
+    let s = state.read().await;
+    let uid = user_id(&s);
+    let db = s.db.lock().await;
+
+    let db_rows = db::instance_list(&db, uid).map_err(|e| e.to_string())?;
+    let db_ids: HashSet<String> = db_rows.iter().map(|r| r.id.clone()).collect();
+
+    let instances_root = yuyu_dir().join("instances");
+    if !instances_root.is_dir() {
+        let _ = std::fs::create_dir_all(&instances_root);
+        return Ok(());
+    }
+
+    let disk_ids: HashSet<String> = std::fs::read_dir(&instances_root)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+
+    // DB entry existe mais le dossier a disparu → retirer de la DB
+    for id in db_ids.difference(&disk_ids) {
+        db::instance_delete(&db, id, uid).ok();
+    }
+
+    // Dossier présent mais pas en DB
+    let orphan_ids: Vec<String> = disk_ids.difference(&db_ids).cloned().collect();
+    match mode.as_str() {
+        "db_wins" => {
+            for id in orphan_ids {
+                let _ = std::fs::remove_dir_all(instances_root.join(&id));
+            }
+        }
+        "disk_wins" => {
+            for id in orphan_ids {
+                let meta_path = instances_root.join(&id).join("meta.json");
+                if let Ok(json) = std::fs::read_to_string(&meta_path) {
+                    if let Ok(meta) = serde_json::from_str::<InstanceMeta>(&json) {
+                        db::instance_insert(&db, &meta.id, uid, &meta.name, &meta.mc_version, &meta.loader, meta.ram_mb).ok();
+                    }
+                }
+                // Pas de meta.json → on laisse le dossier, impossible d'importer
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
 }

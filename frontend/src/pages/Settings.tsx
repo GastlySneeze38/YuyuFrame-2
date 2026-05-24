@@ -3,7 +3,7 @@ import { useStore } from '@/stores/useStore'
 
 export default function Settings() {
   const navigate = useNavigate()
-  const { brightness, setBrightness, defaultRam, setDefaultRam, closeOnLaunch, setCloseOnLaunch } = useStore()
+  const { brightness, setBrightness, defaultRam, setDefaultRam, closeOnLaunch, setCloseOnLaunch, instanceSyncMode, setInstanceSyncMode } = useStore()
 
   return (
     <div className="flex h-full flex-col overflow-hidden" style={{ background: '#09090D' }}>
@@ -110,6 +110,40 @@ export default function Settings() {
                     }}
                   />
                 </button>
+              </div>
+
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+
+              {/* Sync instances au démarrage */}
+              <div className="flex flex-col gap-3">
+                <div>
+                  <p className="text-sm font-medium text-white">Sync instances au démarrage</p>
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
+                    Que faire si des dossiers d'instances ne correspondent pas à la DB
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: 'db_wins', label: 'Supprimer', desc: 'Efface les dossiers sans entrée en DB' },
+                    { value: 'disk_wins', label: 'Importer', desc: 'Ajoute en DB les dossiers détectés' },
+                  ] as const).map(({ value, label, desc }) => {
+                    const active = instanceSyncMode === value
+                    return (
+                      <button
+                        key={value}
+                        onClick={() => setInstanceSyncMode(value)}
+                        className="flex flex-col gap-1 rounded-xl p-3 text-left transition-all duration-150"
+                        style={{
+                          background: active ? 'rgba(75,63,207,0.2)' : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${active ? 'rgba(75,63,207,0.55)' : 'rgba(255,255,255,0.07)'}`,
+                        }}
+                      >
+                        <span className="font-semibold text-white" style={{ fontSize: 12 }}>{label}</span>
+                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', lineHeight: 1.4 }}>{desc}</span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </SCard>

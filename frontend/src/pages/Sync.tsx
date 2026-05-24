@@ -618,7 +618,7 @@ function InstancesSyncCard() {
       </div>
 
       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.1)', textAlign: 'center' }}>
-        config/ + saves sélectionnées (3 max) · Premium
+        mods/ + config/ + saves sélectionnées (3 max) · Premium
       </p>
     </div>
   )
