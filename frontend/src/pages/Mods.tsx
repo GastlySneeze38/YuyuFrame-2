@@ -462,15 +462,22 @@ function InstalledTab({
         </p>
       )}
 
-      {/* En-tête tableur — sticky par rapport au conteneur scrollable parent */}
+      {/* En-tête tableur — structure DOM identique au ModRow pour alignement parfait */}
       {filtered.length > 0 && (
         <div
-          className="flex items-center gap-3 px-4 py-1.5"
-          style={{ position: 'sticky', top: -12, zIndex: 10, background: '#09090D', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: 8 }}
+          className="flex items-center rounded-2xl px-4 py-1.5"
+          style={{ position: 'sticky', top: -12, zIndex: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', marginBottom: 8 }}
         >
-          <div style={{ flex: 1, ...hdr, paddingLeft: 48 }}>Mod</div>
-          <div style={{ flexShrink: 0, width: 110, ...hdr, textAlign: 'center' }}>Version</div>
-          <div style={{ flex: 1, ...hdr, textAlign: 'right' }}>Action</div>
+          <div className="flex items-center gap-3 min-w-0" style={{ flex: 1 }}>
+            <div style={{ width: 36, flexShrink: 0 }} />
+            <div className="min-w-0 flex-1"><span style={hdr}>Mod</span></div>
+          </div>
+          <div style={{ flexShrink: 0, width: 110, textAlign: 'center', padding: '0 8px' }}>
+            <span style={hdr}>Version</span>
+          </div>
+          <div className="flex items-center justify-end gap-2" style={{ flex: 1 }}>
+            <span style={hdr}>Action</span>
+          </div>
         </div>
       )}
 
