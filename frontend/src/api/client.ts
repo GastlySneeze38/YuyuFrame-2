@@ -44,6 +44,8 @@ export const api = {
     delete: (id: string) => invoke<void>('instance_delete', { id }),
     update: (id: string, name: string, mc_version: string, loader: string, ram_mb: number) =>
       invoke<Instance>('instance_update', { id, name, mcVersion: mc_version, loader, ramMb: ram_mb }),
+    duplicate: (sourceId: string, name: string, mc_version: string, ram_mb: number) =>
+      invoke<Instance>('instance_duplicate', { sourceId, name, mcVersion: mc_version, ramMb: ram_mb }),
     toggleFavorite: (id: string) => invoke<Instance>('instance_toggle_favorite', { id }),
     startupSync: (mode: string) => invoke<void>('instance_startup_sync', { mode }),
   },

@@ -156,6 +156,58 @@ pub async fn instance_update(
     Ok(row_to_instance(row))
 }
 
+#[tauri::command]
+pub async fn instance_duplicate(
+    state: tauri::State<'_, SharedState>,
+    source_id: String,
+    name: String,
+    mc_version: String,
+    ram_mb: u32,
+) -> Result<Instance, String> {
+    if name.trim().is_empty() {
+        return Err("Le nom de l'instance est requis".into());
+    }
+    let name = name.trim().to_string();
+
+    let loader = {
+        let s = state.read().await;
+        let uid = user_id(&s);
+        let db = s.db.lock().await;
+        db::instance_get(&db, &source_id, uid)
+            .map_err(|e| e.to_string())?
+            .ok_or("Instance source introuvable")?
+            .loader
+    };
+
+    let new_id = gen_id();
+    tokio::fs::create_dir_all(instance_dir(&new_id)).await.map_err(|e| e.to_string())?;
+
+    let src_mods = instance_mods_dir(&source_id);
+    if src_mods.exists() {
+        let dst_mods = instance_mods_dir(&new_id);
+        tokio::fs::create_dir_all(&dst_mods).await.map_err(|e| e.to_string())?;
+        let mut dir = tokio::fs::read_dir(&src_mods).await.map_err(|e| e.to_string())?;
+        while let Some(entry) = dir.next_entry().await.map_err(|e| e.to_string())? {
+            let src_path = entry.path();
+            if src_path.is_file() {
+                if let Some(filename) = src_path.file_name() {
+                    tokio::fs::copy(&src_path, dst_mods.join(filename)).await.map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    write_meta(&new_id, &name, &mc_version, &loader, ram_mb);
+
+    let s = state.read().await;
+    let uid = user_id(&s);
+    let db = s.db.lock().await;
+    db::instance_insert(&db, &new_id, uid, &name, &mc_version, &loader, ram_mb)
+        .map_err(|e| e.to_string())?;
+
+    Ok(Instance { id: new_id, name, mc_version, loader, ram_mb, favorite: false })
+}
+
 /// Synchronise la DB avec les dossiers réels au démarrage.
 /// mode = "db_wins"   → supprime les dossiers orphelins sur le disque
 /// mode = "disk_wins" → importe en DB les dossiers qui ont un meta.json
