@@ -76,3 +76,33 @@ export interface SyncProgress {
   percent: number
   label: string
 }
+
+export interface InstanceStat {
+  instance_id: string
+  instance_name: string
+  mc_version: string
+  loader: string
+  sessions: number
+  total_secs: number
+}
+
+export interface RecentSession {
+  instance_name: string
+  mc_version: string
+  loader: string
+  started_at: number
+  duration_secs: number
+}
+
+export interface DailyStat {
+  date: string
+  secs: number
+}
+
+export interface StatsData {
+  total_sessions: number
+  total_secs: number
+  per_instance: InstanceStat[]
+  recent_sessions: RecentSession[]
+  daily: DailyStat[]
+}

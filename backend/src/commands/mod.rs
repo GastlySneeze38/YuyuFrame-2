@@ -3,6 +3,7 @@ pub mod instances;
 pub mod launch;
 pub mod mc;
 pub mod mods;
+pub mod stats;
 pub mod sync;
 pub mod versions;
 pub mod yuyu;

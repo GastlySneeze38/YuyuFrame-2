@@ -20,11 +20,15 @@ pub async fn launch_game(
         return Err("Le jeu est déjà en cours".into());
     }
 
+    let yuyu_user_id = {
+        let s = state.read().await;
+        s.yuyu_session.as_ref().map(|y| y.user_id).unwrap_or(0)
+    };
+
     let instance = {
         let s = state.read().await;
-        let user_id = s.yuyu_session.as_ref().map(|y| y.user_id).unwrap_or(0);
         let db = s.db.lock().await;
-        db::instance_get(&db, &instance_id, user_id)
+        db::instance_get(&db, &instance_id, yuyu_user_id)
             .map_err(|e| e.to_string())?
             .ok_or("Instance introuvable")?
     };
@@ -57,8 +61,23 @@ pub async fn launch_game(
     let state_clone = state.inner().clone();
 
     tokio::spawn(async move {
+        let started_at = chrono::Utc::now().timestamp();
         state_clone.write().await.game_running = true;
         let _ = app.emit("game_state", serde_json::json!({ "running": true }));
+
+        let session_id: Option<i64> = {
+            let s = state_clone.read().await;
+            let db = s.db.lock().await;
+            db::session_start(
+                &db,
+                yuyu_user_id,
+                &instance.id,
+                &instance.name,
+                &instance.mc_version,
+                &instance.loader,
+            )
+            .ok()
+        };
 
         if let Err(e) = launcher::download_and_launch(
             &instance.mc_version,
@@ -73,6 +92,13 @@ pub async fn launch_game(
         {
             tracing::error!("Erreur de lancement: {}", e);
             let _ = app.emit("launch_error", e.to_string());
+        }
+
+        if let Some(sid) = session_id {
+            let duration = chrono::Utc::now().timestamp() - started_at;
+            let s = state_clone.read().await;
+            let db = s.db.lock().await;
+            let _ = db::session_end(&db, sid, duration);
         }
 
         state_clone.write().await.game_running = false;
