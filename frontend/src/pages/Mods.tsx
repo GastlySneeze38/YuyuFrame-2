@@ -39,9 +39,8 @@ function displayName(name: string): string {
 
 
 async function fetchVersionsByHash(sha1s: string[]): Promise<Record<string, string>> {
-  if (sha1s.length === 0) return {}
-  const hashes: Record<string, null> = {}
-  sha1s.forEach((h) => { if (h) hashes[h] = null })
+  const hashes = sha1s.filter(Boolean)
+  if (hashes.length === 0) return {}
   try {
     const res = await fetch('https://api.modrinth.com/v2/version_files', {
       method: 'POST',
@@ -161,7 +160,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
     }
   }
 
-  useEffect(() => { loadMods() }, [instanceId])
+  useEffect(() => { setVersionMap({}); loadMods() }, [instanceId])
 
   useEffect(() => {
     if (tab === 'browse' && results.length === 0 && !searching) {
