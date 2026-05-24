@@ -4,6 +4,13 @@ import { api } from '@/api/client'
 import { useStore } from '@/stores/useStore'
 import type { Instance, Mod } from '@/types'
 
+// ── Types internes ───────────────────────────────────────────────────────────
+
+interface ModrinthInfo {
+  version: string
+  modrinthName: string
+}
+
 // ── Modrinth types ────────────────────────────────────────────────────────────
 
 interface ModrinthHit {
@@ -38,7 +45,7 @@ function displayName(name: string): string {
 }
 
 
-async function fetchVersionsByHash(sha1s: string[]): Promise<Record<string, string>> {
+async function fetchVersionsByHash(sha1s: string[]): Promise<Record<string, ModrinthInfo>> {
   const hashes = sha1s.filter(Boolean)
   if (hashes.length === 0) return {}
   try {
@@ -48,9 +55,26 @@ async function fetchVersionsByHash(sha1s: string[]): Promise<Record<string, stri
       body: JSON.stringify({ hashes, algorithm: 'sha1' }),
     })
     if (!res.ok) return {}
-    const data = await res.json() as Record<string, { version_number: string }>
-    const out: Record<string, string> = {}
-    for (const [hash, info] of Object.entries(data)) out[hash] = info.version_number
+    const versionData = await res.json() as Record<string, { version_number: string; project_id: string }>
+
+    // Batch-fetch project titles
+    const projectIds = [...new Set(Object.values(versionData).map((v) => v.project_id))]
+    const projectNames: Record<string, string> = {}
+    if (projectIds.length > 0) {
+      const pRes = await fetch(
+        `https://api.modrinth.com/v2/projects?ids=${encodeURIComponent(JSON.stringify(projectIds))}`,
+        { headers: { 'User-Agent': 'YuyuFrame/1.0' } },
+      )
+      if (pRes.ok) {
+        const projects = await pRes.json() as Array<{ id: string; title: string }>
+        projects.forEach((p) => { projectNames[p.id] = p.title })
+      }
+    }
+
+    const out: Record<string, ModrinthInfo> = {}
+    for (const [hash, info] of Object.entries(versionData)) {
+      out[hash] = { version: info.version_number, modrinthName: projectNames[info.project_id] ?? '' }
+    }
     return out
   } catch {
     return {}
@@ -114,10 +138,10 @@ export function ModsContent({ instance }: { instance: Instance }) {
   const [loadingMods, setLoadingMods] = useState(true)
   const [modsError, setModsError] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [versionMap, setVersionMap] = useState<Record<string, string>>({})
+  const [versionMap, setVersionMap] = useState<Record<string, ModrinthInfo>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const mergeVersions = (fetched: Record<string, string>) =>
+  const mergeVersions = (fetched: Record<string, ModrinthInfo>) =>
     setVersionMap((prev) => ({ ...prev, ...fetched }))
 
   const [query, setQuery] = useState('')
@@ -409,7 +433,7 @@ function InstalledTab({
   onModSearch: (v: string) => void
   showLogos: boolean
   logoCache: Record<string, string | null>
-  versionMap: Record<string, string>
+  versionMap: Record<string, ModrinthInfo>
   onReload: () => void
   onToggle: (mod: Mod) => void
   onDelete: (name: string) => void
@@ -487,7 +511,8 @@ function InstalledTab({
           <ModRow
             key={mod.name}
             mod={mod}
-            version={versionMap[mod.sha1] ?? null}
+            version={versionMap[mod.sha1]?.version ?? null}
+            modrinthName={versionMap[mod.sha1]?.modrinthName || null}
             showLogos={showLogos}
             logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
             onToggle={() => onToggle(mod)}
@@ -568,9 +593,10 @@ function BrowseTab({
 
 // ── Mod row ───────────────────────────────────────────────────────────────────
 
-function ModRow({ mod, version, showLogos, logoUrl, onToggle, onDelete }: {
+function ModRow({ mod, version, modrinthName, showLogos, logoUrl, onToggle, onDelete }: {
   mod: Mod
   version: string | null
+  modrinthName: string | null
   showLogos: boolean
   logoUrl: string | null
   onToggle: () => void
@@ -592,7 +618,7 @@ function ModRow({ mod, version, showLogos, logoUrl, onToggle, onDelete }: {
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold" style={{ fontSize: 13, color: mod.enabled ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)' }}>
-            {displayName(mod.name)}
+            {modrinthName || displayName(mod.name)}
           </p>
           <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 1 }}>{formatSize(mod.size)}</p>
         </div>
