@@ -12,6 +12,15 @@ interface ModrinthInfo {
   projectId: string
 }
 
+interface ModUpdate {
+  mod: Mod
+  modrinthName: string
+  currentVersion: string
+  newVersion: string
+  fileUrl: string
+  filename: string
+}
+
 // ── Modrinth types ────────────────────────────────────────────────────────────
 
 interface ModrinthHit {
@@ -79,6 +88,53 @@ async function fetchVersionsByHash(sha1s: string[]): Promise<Record<string, Modr
     return out
   } catch {
     return {}
+  }
+}
+
+async function checkForUpdates(
+  mods: Mod[],
+  versionData: Record<string, ModrinthInfo>,
+  mcVersion: string,
+  loader: string,
+): Promise<ModUpdate[]> {
+  const eligible = mods.filter((m) => m.sha1)
+  if (eligible.length === 0) return []
+  try {
+    const body: Record<string, unknown> = {
+      hashes: eligible.map((m) => m.sha1),
+      algorithm: 'sha1',
+      game_versions: [mcVersion],
+    }
+    if (loader !== 'vanilla') body.loaders = [loader]
+    const res = await fetch('https://api.modrinth.com/v2/version_files/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'YuyuFrame/1.0' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) return []
+    const data = await res.json() as Record<string, {
+      version_number: string
+      files: Array<{ url: string; filename: string; primary: boolean; hashes?: { sha1?: string } }>
+    }>
+    const updates: ModUpdate[] = []
+    for (const mod of eligible) {
+      const latest = data[mod.sha1]
+      if (!latest) continue
+      const primary = latest.files.find((f) => f.primary) ?? latest.files[0]
+      if (!primary) continue
+      if (primary.hashes?.sha1 === mod.sha1) continue // déjà à jour
+      updates.push({
+        mod,
+        modrinthName: versionData[mod.sha1]?.modrinthName || '',
+        currentVersion: versionData[mod.sha1]?.version || '',
+        newVersion: latest.version_number,
+        fileUrl: primary.url,
+        filename: primary.filename,
+      })
+    }
+    return updates
+  } catch {
+    return []
   }
 }
 
@@ -189,6 +245,9 @@ export function ModsContent({ instance }: { instance: Instance }) {
   const [modsError, setModsError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [versionMap, setVersionMap] = useState<Record<string, ModrinthInfo>>({})
+  const [updates, setUpdates] = useState<ModUpdate[]>([])
+  const [updatingMods, setUpdatingMods] = useState<Set<string>>(new Set())
+  const [updatingAll, setUpdatingAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const mergeVersions = (fetched: Record<string, ModrinthInfo>) =>
@@ -226,7 +285,10 @@ export function ModsContent({ instance }: { instance: Instance }) {
     try {
       const loaded = await api.mods.list(instanceId)
       setMods(loaded)
-      fetchVersionsByHash(loaded.map((m) => m.sha1)).then(mergeVersions)
+      fetchVersionsByHash(loaded.map((m) => m.sha1)).then((vd) => {
+        mergeVersions(vd)
+        checkForUpdates(loaded, vd, mcVersion, loader).then(setUpdates)
+      })
     } catch {
       setModsError('Impossible de charger les mods')
     } finally {
@@ -234,7 +296,7 @@ export function ModsContent({ instance }: { instance: Instance }) {
     }
   }
 
-  useEffect(() => { setVersionMap({}); loadMods() }, [instanceId])
+  useEffect(() => { setVersionMap({}); setUpdates([]); loadMods() }, [instanceId])
 
   useEffect(() => {
     if (tab === 'browse' && results.length === 0 && !searching) {
@@ -254,6 +316,35 @@ export function ModsContent({ instance }: { instance: Instance }) {
       await api.mods.delete(instanceId, name)
       setMods((prev) => prev.filter((m) => m.name !== name))
     } catch { /* ignore */ }
+  }
+
+  const handleUpdateMod = async (update: ModUpdate) => {
+    setUpdatingMods((prev) => new Set([...prev, update.mod.sha1]))
+    try {
+      const newMod = await api.mods.install(instanceId, update.fileUrl, update.filename)
+      if (newMod.name !== update.mod.name) {
+        await api.mods.delete(instanceId, update.mod.name).catch(() => {})
+        setMods((prev) =>
+          [...prev.filter((m) => m.name !== update.mod.name), newMod]
+            .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+        )
+      } else {
+        setMods((prev) => prev.map((m) => m.name === update.mod.name ? newMod : m))
+      }
+      setUpdates((prev) => prev.filter((u) => u.mod.sha1 !== update.mod.sha1))
+      fetchVersionsByHash([newMod.sha1]).then(mergeVersions)
+    } catch { /* ignore */ }
+    finally {
+      setUpdatingMods((prev) => { const s = new Set(prev); s.delete(update.mod.sha1); return s })
+    }
+  }
+
+  const handleUpdateAll = async () => {
+    if (updatingAll) return
+    setUpdatingAll(true)
+    const pending = [...updates]
+    for (const update of pending) await handleUpdateMod(update)
+    setUpdatingAll(false)
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -357,6 +448,25 @@ export function ModsContent({ instance }: { instance: Instance }) {
               </svg>
             </button>
           )}
+          {tab === 'installed' && updates.length > 0 && (
+            <button
+              onClick={handleUpdateAll}
+              disabled={updatingAll}
+              title="Tout mettre à jour"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-all duration-150"
+              style={{
+                background: updatingAll ? 'rgba(255,255,255,0.04)' : 'rgba(250,204,21,0.12)',
+                color: updatingAll ? 'rgba(255,255,255,0.25)' : 'rgba(250,204,21,0.9)',
+                border: '1px solid rgba(250,204,21,0.28)',
+                cursor: updatingAll ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" width={11} height={11}>
+                <path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z" />
+              </svg>
+              {updatingAll ? '...' : updates.length}
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -401,9 +511,13 @@ export function ModsContent({ instance }: { instance: Instance }) {
             showLogos={showLogos}
             logoCache={logoCache}
             versionMap={versionMap}
+            updates={updates}
+            updatingMods={updatingMods}
+            updatingAll={updatingAll}
             onReload={loadMods}
             onToggle={handleToggle}
             onDelete={handleDelete}
+            onUpdateMod={handleUpdateMod}
           />
         ) : (
           <BrowseTab
@@ -470,10 +584,79 @@ export default function Mods() {
   )
 }
 
+// ── Updates panel ────────────────────────────────────────────────────────────
+
+function UpdatesPanel({ updates, updatingMods, updatingAll, onUpdate, onUpdateAll }: {
+  updates: ModUpdate[]
+  updatingMods: Set<string>
+  updatingAll: boolean
+  onUpdate: (u: ModUpdate) => void
+  onUpdateAll: () => void
+}) {
+  return (
+    <div className="mb-3 overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(250,204,21,0.18)', background: 'rgba(250,204,21,0.04)' }}>
+      <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid rgba(250,204,21,0.1)' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(250,204,21,0.7)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {updates.length} mise{updates.length > 1 ? 's' : ''} à jour disponible{updates.length > 1 ? 's' : ''}
+        </span>
+        <button
+          onClick={onUpdateAll}
+          disabled={updatingAll}
+          style={{
+            fontSize: 11, fontWeight: 700, height: 26, padding: '0 12px', borderRadius: 8,
+            background: updatingAll ? 'rgba(255,255,255,0.04)' : 'rgba(250,204,21,0.15)',
+            border: '1px solid rgba(250,204,21,0.28)',
+            color: updatingAll ? 'rgba(255,255,255,0.25)' : 'rgba(250,204,21,0.9)',
+            cursor: updatingAll ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {updatingAll ? 'Mise à jour...' : 'Tout mettre à jour'}
+        </button>
+      </div>
+      {updates.map((u, i) => {
+        const busy = updatingMods.has(u.mod.sha1) || updatingAll
+        const name = u.modrinthName || displayName(u.mod.name)
+        return (
+          <div
+            key={u.mod.sha1}
+            className="flex items-center gap-3 px-4 py-2.5"
+            style={{ borderBottom: i < updates.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
+          >
+            <p className="min-w-0 flex-1 truncate font-semibold" style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
+              {name}
+            </p>
+            <div className="flex flex-shrink-0 items-center gap-1.5" style={{ fontSize: 10 }}>
+              <span style={{ color: 'rgba(255,255,255,0.28)' }}>{u.currentVersion}</span>
+              <svg viewBox="0 0 24 24" fill="currentColor" width={10} height={10} style={{ color: 'rgba(250,204,21,0.45)' }}>
+                <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z" />
+              </svg>
+              <span style={{ color: 'rgba(250,204,21,0.85)', fontWeight: 700 }}>{u.newVersion}</span>
+            </div>
+            <button
+              onClick={() => onUpdate(u)}
+              disabled={busy}
+              style={{
+                fontSize: 10, fontWeight: 700, height: 24, padding: '0 10px', borderRadius: 7, flexShrink: 0,
+                background: busy ? 'rgba(255,255,255,0.04)' : 'rgba(250,204,21,0.12)',
+                border: '1px solid rgba(250,204,21,0.22)',
+                color: busy ? 'rgba(255,255,255,0.2)' : 'rgba(250,204,21,0.85)',
+                cursor: busy ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {updatingMods.has(u.mod.sha1) ? '...' : 'Mettre à jour'}
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Installed tab ─────────────────────────────────────────────────────────────
 
 function InstalledTab({
-  mods, loading, error, isPlugin, modSearch, onModSearch, showLogos, logoCache, versionMap, onReload, onToggle, onDelete,
+  mods, loading, error, isPlugin, modSearch, onModSearch, showLogos, logoCache, versionMap,
+  updates, updatingMods, updatingAll, onReload, onToggle, onDelete, onUpdateMod,
 }: {
   mods: Mod[]
   loading: boolean
@@ -484,9 +667,13 @@ function InstalledTab({
   showLogos: boolean
   logoCache: Record<string, string | null>
   versionMap: Record<string, ModrinthInfo>
+  updates: ModUpdate[]
+  updatingMods: Set<string>
+  updatingAll: boolean
   onReload: () => void
   onToggle: (mod: Mod) => void
   onDelete: (name: string) => void
+  onUpdateMod: (u: ModUpdate) => void
 }) {
   if (loading) return <Spinner />
   if (error) return <ErrorState message={error} onRetry={onReload} />
@@ -557,18 +744,24 @@ function InstalledTab({
 
       {/* Liste des mods */}
       <div className="flex flex-col gap-2">
-        {filtered.map((mod) => (
-          <ModRow
-            key={mod.name}
-            mod={mod}
-            version={versionMap[mod.sha1]?.version ?? null}
-            modrinthName={versionMap[mod.sha1]?.modrinthName || null}
-            showLogos={showLogos}
-            logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
-            onToggle={() => onToggle(mod)}
-            onDelete={() => onDelete(mod.name)}
-          />
-        ))}
+        {filtered.map((mod) => {
+          const update = updates.find((u) => u.mod.sha1 === mod.sha1) ?? null
+          return (
+            <ModRow
+              key={mod.name}
+              mod={mod}
+              version={versionMap[mod.sha1]?.version ?? null}
+              modrinthName={versionMap[mod.sha1]?.modrinthName || null}
+              update={update}
+              updating={updatingMods.has(mod.sha1) || updatingAll}
+              showLogos={showLogos}
+              logoUrl={showLogos ? (logoCache[displayName(mod.name)] ?? null) : null}
+              onToggle={() => onToggle(mod)}
+              onDelete={() => onDelete(mod.name)}
+              onUpdate={() => update && onUpdateMod(update)}
+            />
+          )
+        })}
       </div>
     </div>
   )
@@ -643,14 +836,17 @@ function BrowseTab({
 
 // ── Mod row ───────────────────────────────────────────────────────────────────
 
-function ModRow({ mod, version, modrinthName, showLogos, logoUrl, onToggle, onDelete }: {
+function ModRow({ mod, version, modrinthName, update, updating, showLogos, logoUrl, onToggle, onDelete, onUpdate }: {
   mod: Mod
   version: string | null
   modrinthName: string | null
+  update: ModUpdate | null
+  updating: boolean
   showLogos: boolean
   logoUrl: string | null
   onToggle: () => void
   onDelete: () => void
+  onUpdate: () => void
 }) {
   const [confirm, setConfirm] = useState(false)
   return (
@@ -683,6 +879,30 @@ function ModRow({ mod, version, modrinthName, showLogos, logoUrl, onToggle, onDe
 
       {/* Section droite : actions (flex-1, alignées à droite) */}
       <div className="flex items-center justify-end gap-2" style={{ flex: 1 }}>
+        {update && (
+          <button
+            onClick={onUpdate}
+            disabled={updating}
+            title={`Mettre à jour → ${update.newVersion}`}
+            className="flex h-7 flex-shrink-0 items-center gap-1 rounded-lg px-2 transition-all duration-150"
+            style={{
+              fontSize: 10, fontWeight: 700,
+              background: updating ? 'rgba(255,255,255,0.04)' : 'rgba(250,204,21,0.12)',
+              border: '1px solid rgba(250,204,21,0.28)',
+              color: updating ? 'rgba(255,255,255,0.2)' : 'rgba(250,204,21,0.85)',
+              cursor: updating ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {updating ? (
+              <span className="h-3 w-3 animate-spin rounded-full border-2" style={{ borderColor: 'rgba(255,255,255,0.1)', borderTopColor: 'rgba(250,204,21,0.6)' }} />
+            ) : (
+              <svg viewBox="0 0 24 24" fill="currentColor" width={10} height={10}>
+                <path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z" />
+              </svg>
+            )}
+            {update.newVersion}
+          </button>
+        )}
         <button onClick={onToggle} title={mod.enabled ? 'Désactiver' : 'Activer'}
           className="relative flex-shrink-0"
           style={{ width: 40, height: 22, borderRadius: 11, background: mod.enabled ? '#4B3FCF' : 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer' }}>
