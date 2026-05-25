@@ -1,6 +1,9 @@
 use base64::Engine as _;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Mutex, LazyLock};
 
 use crate::commands::instances::instance_mods_dir;
 
@@ -12,11 +15,16 @@ pub struct ModInfo {
     pub sha1: String,
 }
 
+// Cache SHA1 : chemin → (taille, mtime_secs, sha1)
+// Invalidé automatiquement si le fichier est modifié ou remplacé.
+static SHA1_CACHE: LazyLock<Mutex<HashMap<PathBuf, (u64, u64, String)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 fn compute_sha1(path: &std::path::Path) -> String {
     use std::io::Read;
     let Ok(mut file) = std::fs::File::open(path) else { return String::new() };
     let mut hasher = Sha1::new();
-    let mut buf = [0u8; 8192];
+    let mut buf = [0u8; 65536];
     loop {
         match file.read(&mut buf) {
             Ok(0) | Err(_) => break,
@@ -24,6 +32,31 @@ fn compute_sha1(path: &std::path::Path) -> String {
         }
     }
     format!("{:x}", hasher.finalize())
+}
+
+fn sha1_cached(path: &std::path::Path) -> String {
+    let Ok(meta) = std::fs::metadata(path) else { return String::new() };
+    let size = meta.len();
+    let mtime = meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let key = path.to_path_buf();
+    if let Ok(cache) = SHA1_CACHE.lock() {
+        if let Some((cs, cm, sha1)) = cache.get(&key) {
+            if *cs == size && *cm == mtime {
+                return sha1.clone();
+            }
+        }
+    }
+
+    let sha1 = compute_sha1(path);
+    if let Ok(mut cache) = SHA1_CACHE.lock() {
+        cache.insert(key, (size, mtime, sha1.clone()));
+    }
+    sha1
 }
 
 #[tauri::command]
@@ -41,7 +74,10 @@ pub async fn mods_list(instance_id: String) -> Result<Vec<ModInfo>, String> {
                 continue;
             }
             let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
-            let sha1 = compute_sha1(&path);
+            let path_clone = path.clone();
+            let sha1 = tokio::task::spawn_blocking(move || sha1_cached(&path_clone))
+                .await
+                .unwrap_or_default();
             mods.push(ModInfo { name, size, enabled, sha1 });
         }
     }
@@ -71,7 +107,9 @@ pub async fn mods_toggle(instance_id: String, name: String) -> Result<ModInfo, S
     tokio::fs::rename(&from, &to).await.map_err(|e| e.to_string())?;
 
     let size = tokio::fs::metadata(&to).await.map(|m| m.len()).unwrap_or(0);
-    let sha1 = compute_sha1(&to);
+    let sha1 = tokio::task::spawn_blocking(move || sha1_cached(&to))
+        .await
+        .unwrap_or_default();
     Ok(ModInfo { name: to_name, size, enabled, sha1 })
 }
 
@@ -129,7 +167,9 @@ pub async fn mods_install(
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     let dest = dir.join(&safe_name);
     tokio::fs::write(&dest, &bytes).await.map_err(|e| e.to_string())?;
-    let sha1 = compute_sha1(&dest);
+    let sha1 = tokio::task::spawn_blocking(move || sha1_cached(&dest))
+        .await
+        .unwrap_or_default();
 
     Ok(ModInfo { name: safe_name, size: bytes.len() as u64, enabled: true, sha1 })
 }
@@ -138,15 +178,21 @@ pub async fn mods_install(
 /// Lit le champ `icon` de fabric.mod.json, avec repli sur pack.png.
 #[tauri::command]
 pub async fn mod_icon(instance_id: String, name: String) -> Result<String, String> {
-    use std::io::Read;
-
     let dir = instance_mods_dir(&instance_id);
     let path = dir.join(&name);
     if !path.exists() {
         return Err("Mod introuvable".into());
     }
 
-    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || mod_icon_blocking(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn mod_icon_blocking(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Read;
+
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
 
     // Lire fabric.mod.json pour trouver le chemin de l'icône
     let icon_path: Option<String> = {
@@ -216,7 +262,9 @@ pub async fn mods_upload(
     let dest = dir.join(&safe_name);
     let size = data.len() as u64;
     tokio::fs::write(&dest, &data).await.map_err(|e| e.to_string())?;
-    let sha1 = compute_sha1(&dest);
+    let sha1 = tokio::task::spawn_blocking(move || sha1_cached(&dest))
+        .await
+        .unwrap_or_default();
 
     Ok(ModInfo { name: safe_name, size, enabled: true, sha1 })
 }

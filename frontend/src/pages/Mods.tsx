@@ -237,6 +237,9 @@ const _modrinthCache: Record<string, {
   updates: ModUpdate[]
 }> = {}
 
+// Cache icônes module-level — clé : "instanceId/modDisplayName"
+const _iconCache: Record<string, string | null> = {}
+
 // ── ModsContent — embeddable in any page ──────────────────────────────────────
 
 export function ModsContent({ instance }: { instance: Instance }) {
@@ -271,13 +274,31 @@ export function ModsContent({ instance }: { instance: Instance }) {
 
   useEffect(() => {
     if (mods.length === 0) return
-    mods.forEach(async (mod) => {
+    const fromCache: Record<string, string | null> = {}
+    const missing: Mod[] = []
+
+    for (const mod of mods) {
       const key = displayName(mod.name)
-      if (key in logoCache) return
+      const cacheKey = `${instanceId}/${key}`
+      if (cacheKey in _iconCache) {
+        fromCache[key] = _iconCache[cacheKey]
+      } else {
+        missing.push(mod)
+      }
+    }
+
+    if (Object.keys(fromCache).length > 0)
+      setLogoCache((prev) => ({ ...prev, ...fromCache }))
+
+    missing.forEach(async (mod) => {
+      const key = displayName(mod.name)
+      const cacheKey = `${instanceId}/${key}`
       try {
         const dataUrl = await api.mods.icon(instanceId, mod.name)
+        _iconCache[cacheKey] = dataUrl
         setLogoCache((prev) => ({ ...prev, [key]: dataUrl }))
       } catch {
+        _iconCache[cacheKey] = null
         setLogoCache((prev) => ({ ...prev, [key]: null }))
       }
     })
