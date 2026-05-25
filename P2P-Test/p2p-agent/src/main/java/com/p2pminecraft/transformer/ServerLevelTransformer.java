@@ -14,7 +14,12 @@ public class ServerLevelTransformer {
 
     public static byte[] transform(byte[] classBytes) {
         ClassReader reader = new ClassReader(classBytes);
-        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                return "java/lang/Object";
+            }
+        };
 
         reader.accept(new ClassVisitor(ASM9, writer) {
             @Override

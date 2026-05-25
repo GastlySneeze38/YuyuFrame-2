@@ -5,6 +5,7 @@ import org.objectweb.asm.commons.ClassRemapper;
 import java.io.*;
 import java.util.*;
 import java.util.jar.*;
+import java.util.ArrayList;
 import java.util.jar.Attributes;
 
 /**
@@ -21,8 +22,9 @@ public class MojangRemapper {
     private static final Map<String, String> deobfToObf = new HashMap<>();
     // Map complète pour le remapper (classes + méthodes + champs)
     private static final Map<String, String> asmMap = new HashMap<>();
-    // obfInternalName → obfSuperInternalName (hiérarchie pour résolution des méthodes héritées)
-    private static final Map<String, String> superClassMap = new HashMap<>();
+    // obfInternalName → liste de parents directs : [superclasse, interfaces...]
+    // Nécessaire pour résoudre les méthodes héritées d'interfaces (ex : Registry → DefaultedRegistry)
+    private static final Map<String, List<String>> parentsMap = new HashMap<>();
 
     public static void main(String[] args) throws Exception {
         if (args.length < 3) {
@@ -36,7 +38,7 @@ public class MojangRemapper {
 
         System.out.println("[MojangRemapper] Lecture de la hiérarchie de classes...");
         buildHierarchy(args[0]);
-        System.out.println("[MojangRemapper] " + superClassMap.size() + " relations parent-enfant");
+        System.out.println("[MojangRemapper] " + parentsMap.size() + " classes avec parents");
 
         System.out.println("[MojangRemapper] Remapping JAR...");
         remapJar(args[0], args[2]);
@@ -176,10 +178,15 @@ public class MojangRemapper {
                 try (InputStream is = jar.getInputStream(entry)) {
                     ClassReader cr = new ClassReader(is.readAllBytes());
                     String child = cr.getClassName();
+                    List<String> parents = new ArrayList<>();
                     String superName = cr.getSuperName();
                     if (superName != null && !superName.equals("java/lang/Object")) {
-                        superClassMap.put(child, superName);
+                        parents.add(superName);
                     }
+                    for (String iface : cr.getInterfaces()) {
+                        parents.add(iface);
+                    }
+                    if (!parents.isEmpty()) parentsMap.put(child, parents);
                 } catch (Exception ignored) {}
             }
         }
@@ -271,8 +278,13 @@ public class MojangRemapper {
         public String mapFieldName(String owner, String name, String descriptor) {
             String result = asmMap.get(owner + "." + name);
             if (result != null) return result;
-            String parent = superClassMap.get(owner);
-            if (parent != null) return mapFieldName(parent, name, descriptor);
+            List<String> parents = parentsMap.get(owner);
+            if (parents != null) {
+                for (String parent : parents) {
+                    String r = mapFieldName(parent, name, descriptor);
+                    if (!r.equals(name)) return r;
+                }
+            }
             return name;
         }
 
@@ -280,9 +292,14 @@ public class MojangRemapper {
         public String mapMethodName(String owner, String name, String descriptor) {
             String result = asmMap.get(owner + "." + name + descriptor);
             if (result != null) return result;
-            // Méthode non trouvée sur owner → chercher dans la super-classe
-            String parent = superClassMap.get(owner);
-            if (parent != null) return mapMethodName(parent, name, descriptor);
+            // Non trouvé → chercher dans superclasse ET toutes les interfaces
+            List<String> parents = parentsMap.get(owner);
+            if (parents != null) {
+                for (String parent : parents) {
+                    String r = mapMethodName(parent, name, descriptor);
+                    if (!r.equals(name)) return r;
+                }
+            }
             return name;
         }
     }
