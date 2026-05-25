@@ -840,9 +840,11 @@ fn find_system_java(required_major: u32) -> Option<String> {
         &["/usr/lib/jvm", "/usr/local/lib/jvm", "/opt/java"]
     };
 
-    // Pour Java 8 : on n'accepte que Java 8 (LaunchWrapper plante sur Java 9+)
-    // Pour Java 9+ : on accepte n'importe quelle version >= required
-    let max_major = if required_major <= 8 { 8 } else { u32::MAX };
+    // Java 8 : version exacte (LaunchWrapper incompatible Java 9+).
+    // Java 9+ : version exacte uniquement — versions plus récentes (ex : Java 24 avec MC
+    // qui requiert 21) changent l'ordre d'init des classes et font crasher LWJGL 3.3.3
+    // nativement en présence d'un agent JVM. ensure_java() télécharge le runtime Mojang sinon.
+    let max_major = required_major;
 
     let mut best: Option<(u32, String)> = None;
     for root in roots {
