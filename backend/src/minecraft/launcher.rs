@@ -2,8 +2,9 @@ use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -240,7 +241,7 @@ pub async fn download_and_launch(
         .unwrap_or("jre-legacy"); // composant Mojang pour Java 8
     let java = ensure_java(java_component, required_java, &mc_dir, &client, &app).await?;
     let java_major = detect_java_major_version(&java).await.unwrap_or(17);
-    tracing::info!("MC {} requiert Java {} — utilise : {}", version_id, required_java, java);
+    let _ = app.emit("game_log", serde_json::json!({ "line": format!("MC {} requiert Java {} — utilise : {}", version_id, required_java, java), "level": "out" }));
 
     let (main_class, extra_classpath, extra_game_args, extra_jvm_args) =
         match loader.unwrap_or("vanilla") {
@@ -253,7 +254,7 @@ pub async fn download_and_launch(
     // Démarre le signaling, prépare le JAR mappé et l'arg -javaagent si p2p=true.
     // Fait avant d'attendre les assets pour paralléliser le remapping (>1 min) avec leur DL.
     let (effective_client_jar, p2p_jvm_args) = if p2p {
-        p2p::start_signaling();
+        p2p::start_signaling(app.clone());
 
         // Copier rust_core.dll dans natives_dir pour que -Djava.library.path le trouve
         let dll_name = if cfg!(target_os = "windows") { "rust_core.dll" } else { "librust_core.so" };
@@ -280,7 +281,7 @@ pub async fn download_and_launch(
             agent_jar.display(), peer_id, session.username, p2p::SIGNALING_PORT,
         );
 
-        tracing::info!("[P2P] Agent : {}", agent_arg);
+        let _ = app.emit("game_log", serde_json::json!({ "line": format!("[P2P] Agent : {}", agent_arg), "level": "out" }));
         (mapped, vec![agent_arg])
     } else {
         (client_jar.clone(), vec![])
@@ -302,13 +303,18 @@ pub async fn download_and_launch(
     let classpath_str = dedup_classpath(full_classpath).join(classpath_sep);
 
     let mut args = build_jvm_args(ram_mb, &natives_dir, java_major);
+    let gc_msg = if java_major >= 21 {
+        format!("Java {} détecté — ZGC Generational activé", java_major)
+    } else {
+        format!("Java {} détecté — G1GC client activé", java_major)
+    };
+    let _ = app.emit("game_log", serde_json::json!({ "line": gc_msg, "level": "out" }));
     args.extend(extra_jvm_args);
     args.extend(p2p_jvm_args);
     args.extend(["-cp".to_string(), classpath_str, main_class]);
     args.extend(build_game_args(&details, session, game_dir, &assets_dir, version_id));
     args.extend(extra_game_args);
 
-    tracing::info!("Commande Java : {} {}", java, args.join(" "));
 
     // Laisser à la fenêtre console le temps d'enregistrer ses listeners JS
     // avant de spawner Java — évite de perdre les premières lignes de log
@@ -318,6 +324,11 @@ pub async fn download_and_launch(
     // Passe le timer Windows à 1ms (défaut : 15ms) pour réduire le jitter de scheduling
     #[cfg(target_os = "windows")]
     unsafe { timeBeginPeriod(1); }
+
+    let log_path = game_dir.join("logs").join("latest.log");
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_flag_tailer = stop_flag.clone();
+    let app_log = app.clone();
 
     let mut child = tokio::process::Command::new(&java)
         .args(&args)
@@ -338,7 +349,6 @@ pub async fn download_and_launch(
             let mut line = String::new();
             while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
                 let trimmed = line.trim_end().to_string();
-                tracing::info!("[MC out] {}", trimmed);
                 let _ = app_out.emit("game_log", serde_json::json!({ "line": trimmed, "level": "out" }));
                 line.clear();
             }
@@ -350,17 +360,69 @@ pub async fn download_and_launch(
             let mut line = String::new();
             while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
                 let trimmed = line.trim_end().to_string();
-                tracing::info!("[MC err] {}", trimmed);
                 let _ = app_err.emit("game_log", serde_json::json!({ "line": trimmed, "level": "err" }));
                 line.clear();
             }
         });
     }
 
+    // Tailer logs/latest.log — Minecraft route ses logs via log4j2 vers ce fichier
+    // plutôt que vers stdout, donc on lit le fichier directement.
+    let log_tailer = tokio::spawn(async move {
+        let mut pos: u64 = 0;
+        let mut last_len: u64 = 0;
+
+        loop {
+            if let Ok(metadata) = tokio::fs::metadata(&log_path).await {
+                let len = metadata.len();
+                if len < last_len {
+                    // Fichier recréé au démarrage — recommencer depuis le début
+                    pos = 0;
+                }
+                last_len = len;
+
+                if len > pos {
+                    if let Ok(mut file) = tokio::fs::File::open(&log_path).await {
+                        if file.seek(std::io::SeekFrom::Start(pos)).await.is_ok() {
+                            let mut reader = BufReader::new(file);
+                            let mut line = String::new();
+                            loop {
+                                line.clear();
+                                match reader.read_line(&mut line).await {
+                                    Ok(0) => break,
+                                    Ok(n) => {
+                                        pos += n as u64;
+                                        let trimmed = line.trim_end().to_string();
+                                        if !trimmed.is_empty() {
+                                            let _ = app_log.emit("game_log", serde_json::json!({
+                                                "line": trimmed,
+                                                "level": "out"
+                                            }));
+                                        }
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if stop_flag_tailer.load(Ordering::Relaxed) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+
     // Clear progress — game is now running
     state.write().await.download_progress = None;
     let status = child.wait().await?;
     tracing::info!("Minecraft terminé — code de sortie : {}", status);
+
+    // Arrêter le tailer et attendre qu'il finisse de vider les dernières lignes
+    stop_flag.store(true, Ordering::Relaxed);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), log_tailer).await;
 
     // Restaure la résolution du timer Windows
     #[cfg(target_os = "windows")]
@@ -502,7 +564,6 @@ fn build_jvm_args(ram_mb: u32, natives_dir: &PathBuf, java_major: u32) -> Vec<St
         // ── ZGC Generational (Java 21+) ───────────────────────────────────────
         // GC concurrent : collecte en parallèle du jeu → pauses < 1ms
         // Élimine les freezes récurrents de 200ms causés par G1 mixed collections
-        tracing::info!("Java {} détecté — ZGC Generational activé", java_major);
         let mut args = base;
         args.push("-XX:+UseZGC".into());
         // ZGenerational est le défaut depuis Java 24 — ne pas l'ajouter pour éviter le warning
@@ -517,7 +578,6 @@ fn build_jvm_args(ram_mb: u32, natives_dir: &PathBuf, java_major: u32) -> Vec<St
     } else {
         // ── G1GC (Java 17/18/19/20) ──────────────────────────────────────────
         // ZGC Generational non disponible, fallback G1GC avec tuning client
-        tracing::info!("Java {} détecté — G1GC client activé", java_major);
         let region_size = if ram_mb >= 12288 { "16M" }
             else if ram_mb >= 6144 { "8M" }
             else if ram_mb >= 3072 { "4M" }

@@ -51,7 +51,7 @@ type PeerMap = Arc<Mutex<HashMap<String, PeerHandle>>>;
 static SIGNALING_STARTED: OnceLock<()> = OnceLock::new();
 
 /// Démarre le signaling WebSocket en arrière-plan (idempotent).
-pub fn start_signaling() {
+pub fn start_signaling(app: tauri::AppHandle) {
     SIGNALING_STARTED.get_or_init(|| {
         let peers: PeerMap = Arc::new(Mutex::new(HashMap::new()));
         let pm = peers.clone();
@@ -63,7 +63,10 @@ pub fn start_signaling() {
                     return;
                 }
             };
-            tracing::info!("[P2P Signaling] En écoute sur ws://127.0.0.1:{}", SIGNALING_PORT);
+            let _ = app.emit("game_log", serde_json::json!({
+                "line": format!("[P2P Signaling] En écoute sur ws://127.0.0.1:{}", SIGNALING_PORT),
+                "level": "out"
+            }));
             for stream in listener.incoming().flatten() {
                 let pm = pm.clone();
                 thread::spawn(move || handle_peer(stream, pm));
@@ -168,7 +171,10 @@ pub async fn ensure_mapped_jar(
 
     let mapped_jar = cache_dir.join(format!("client-{}-mapped.jar", version));
     if mapped_jar.exists() {
-        tracing::info!("[P2P] JAR mappé en cache : {}", mapped_jar.display());
+        let _ = app.emit("game_log", serde_json::json!({
+            "line": format!("[P2P] JAR mappé en cache : {}", mapped_jar.display()),
+            "level": "out"
+        }));
         return Ok(mapped_jar);
     }
 
@@ -208,7 +214,10 @@ pub async fn ensure_mapped_jar(
         return Err(anyhow!("Remapping du JAR Minecraft échoué — voir les logs"));
     }
 
-    tracing::info!("[P2P] JAR mappé → {}", mapped_jar.display());
+    let _ = app.emit("game_log", serde_json::json!({
+        "line": format!("[P2P] JAR mappé → {}", mapped_jar.display()),
+        "level": "out"
+    }));
     Ok(mapped_jar)
 }
 
