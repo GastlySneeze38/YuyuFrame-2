@@ -29,11 +29,20 @@ pub fn p2p_dir() -> PathBuf {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Msg {
-    Join     { id: String, name: String },
-    Position { id: String, x: i32, z: i32 },
-    PeerList { peers: Vec<PeerEntry> },
+    Join      { id: String, name: String },
+    Position  { id: String, x: i32, z: i32 },
+    PeerList  { peers: Vec<PeerEntry> },
     PeerJoined { id: String, name: String, x: i32, z: i32 },
-    PeerLeft { id: String },
+    PeerLeft  { id: String },
+    /// Relay de données entre pairs.
+    /// `to` absent = broadcast à tous sauf `from`.
+    /// `to` présent = unicast vers le pair ciblé.
+    Data {
+        from: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
+        payload: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -132,6 +141,25 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                             p.x = x; p.z = z;
                         }
                         send_all(&peers, &id, &raw);
+                    }
+                    Ok(Msg::Data { ref from, ref to, ref payload }) => {
+                        let out = serde_json::to_string(&Msg::Data {
+                            from: from.clone(),
+                            to: to.clone(),
+                            payload: payload.clone(),
+                        }).unwrap();
+                        match to {
+                            Some(target) => {
+                                // Unicast vers le pair ciblé
+                                if let Some(peer) = peers.lock().unwrap().get(target.as_str()) {
+                                    peer.tx.send(out).ok();
+                                }
+                            }
+                            None => {
+                                // Broadcast à tous sauf l'émetteur
+                                send_all(&peers, from, &out);
+                            }
+                        }
                     }
                     _ => {}
                 }

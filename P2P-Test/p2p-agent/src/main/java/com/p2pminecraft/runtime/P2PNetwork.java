@@ -2,6 +2,7 @@ package com.p2pminecraft.runtime;
 
 import java.net.URI;
 import java.net.http.*;
+import java.util.Base64;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -18,11 +19,18 @@ public class P2PNetwork {
 
     private static final String DEFAULT_SIGNALING = "ws://127.0.0.1:8765";
 
+    /** Callback appelé à chaque message data reçu d'un pair. */
+    @FunctionalInterface
+    public interface DataReceiver {
+        void onData(String fromId, byte[] payload);
+    }
+
     private volatile WebSocket ws;
     private final String peerId;
     private final String peerName;
     private final String signalingUrl;
     private final AtomicBoolean connected = new AtomicBoolean(false);
+    private volatile DataReceiver dataReceiver;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "p2p-network");
         t.setDaemon(true);
@@ -63,6 +71,36 @@ public class P2PNetwork {
         if (connected.get()) {
             send("{\"type\":\"position\",\"id\":\"" + peerId + "\",\"x\":" + cx + ",\"z\":" + cz + "}");
         }
+    }
+
+    /** Enregistre le callback appelé à réception d'un message data. */
+    public void setDataReceiver(DataReceiver receiver) {
+        this.dataReceiver = receiver;
+    }
+
+    /**
+     * Envoie des données binaires à un pair spécifique (unicast).
+     * Thread-safe : routé via le scheduler.
+     */
+    public void sendData(String toId, byte[] payload) {
+        if (!connected.get()) return;
+        String b64  = Base64.getEncoder().encodeToString(payload);
+        String json = "{\"type\":\"data\",\"from\":\"" + peerId
+                    + "\",\"to\":\"" + toId
+                    + "\",\"payload\":\"" + b64 + "\"}";
+        scheduler.execute(() -> send(json));
+    }
+
+    /**
+     * Diffuse des données binaires à tous les pairs (broadcast).
+     * Thread-safe : routé via le scheduler.
+     */
+    public void broadcastData(byte[] payload) {
+        if (!connected.get()) return;
+        String b64  = Base64.getEncoder().encodeToString(payload);
+        String json = "{\"type\":\"data\",\"from\":\"" + peerId
+                    + "\",\"payload\":\"" + b64 + "\"}";
+        scheduler.execute(() -> send(json));
     }
 
     public void stop() {
@@ -133,6 +171,19 @@ public class P2PNetwork {
                     DistributedChunkManager.upsertPeer(id, x, z);
                 }
             }
+            case "data" -> {
+                String from = extract(json, "from");
+                String b64  = extractRaw(json, "payload");
+                DataReceiver dr = dataReceiver;
+                if (from != null && b64 != null && dr != null) {
+                    try {
+                        byte[] data = Base64.getDecoder().decode(b64);
+                        dr.onData(from, data);
+                    } catch (Exception e) {
+                        System.err.println("[P2P] Erreur décodage data : " + e.getMessage());
+                    }
+                }
+            }
         }
     }
 
@@ -152,7 +203,9 @@ public class P2PNetwork {
         System.out.println("[P2P] " + DistributedChunkManager.stats());
     }
 
-    // Mini-parseur JSON par regexp (évite dépendance Gson au runtime)
+    // Mini-parseur JSON (évite dépendance Gson au runtime)
+
+    /** Extrait une valeur string simple (sans guillemets imbriqués). */
     private static String extract(String json, String key) {
         String search = "\"" + key + "\"";
         int i = json.indexOf(search);
@@ -168,6 +221,24 @@ public class P2PNetwork {
 
     private static String extractFrom(String json, String key, int from) {
         return extract(json.substring(from), key);
+    }
+
+    /** Extrait la valeur brute d'une clé string (supporte les valeurs longues avec '='). */
+    private static String extractRaw(String json, String key) {
+        String search = "\"" + key + "\"";
+        int i = json.indexOf(search);
+        if (i < 0) return null;
+        i = json.indexOf(':', i) + 1;
+        while (i < json.length() && json.charAt(i) == ' ') i++;
+        if (i >= json.length() || json.charAt(i) != '"') return null;
+        i++; // saute le guillemet ouvrant
+        int end = i;
+        // Cherche le guillemet fermant non échappé
+        while (end < json.length()) {
+            if (json.charAt(end) == '"' && (end == 0 || json.charAt(end - 1) != '\\')) break;
+            end++;
+        }
+        return json.substring(i, end);
     }
 
     private static int extractInt(String json, String key) {

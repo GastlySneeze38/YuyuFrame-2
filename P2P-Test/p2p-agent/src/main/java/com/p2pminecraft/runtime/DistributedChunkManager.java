@@ -20,6 +20,11 @@ public class DistributedChunkManager {
     private static volatile long chunksSkipped = 0;
     private static volatile long chunksComputed = 0;
 
+    // Broadcast de position périodique (toutes les 2s)
+    private static volatile long lastPositionBroadcast = 0;
+    private static volatile int  lastBroadcastCx = Integer.MIN_VALUE;
+    private static volatile int  lastBroadcastCz = Integer.MIN_VALUE;
+
     // ---- API appelée par le bytecode injecté ----
 
     public static boolean shouldTickWorld() {
@@ -37,8 +42,25 @@ public class DistributedChunkManager {
     }
 
     public static void afterChunkTick(int cx, int cz) {
-        // Phase 2 : notifier P2PNetwork des changements dirty
-        // Pour l'instant no-op
+        long now = System.currentTimeMillis();
+        if (now - lastPositionBroadcast > 2000) {
+            lastPositionBroadcast = now;
+            if (cx != lastBroadcastCx || cz != lastBroadcastCz) {
+                lastBroadcastCx = cx;
+                lastBroadcastCz = cz;
+                P2PNetwork net = RuntimeInitializer.getNetwork();
+                if (net != null) net.updateMyPosition(cx, cz);
+            }
+            System.out.println("[P2P] " + stats());
+        }
+        // TODO Phase 2 : sérialiser les blocs dirty et appeler net.broadcastData(...)
+    }
+
+    /** Reçoit et dispatche un message data d'un pair. */
+    public static void onDataReceived(String fromId, byte[] data) {
+        // TODO Phase 2 : parser le type de message et appliquer (blocs, entités...)
+        System.out.println("[P2P] Data reçue de " + fromId.substring(0, Math.min(8, fromId.length()))
+            + " : " + data.length + " bytes");
     }
 
     // ---- API appelée par P2PNetwork ----

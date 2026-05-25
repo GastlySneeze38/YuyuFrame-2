@@ -20,6 +20,7 @@ public class RuntimeInitializer {
         DistributedChunkManager.init(config.peerId, 0, 0);
 
         network = new P2PNetwork(config.peerId, config.peerName, config.signalingUrl);
+        network.setDataReceiver(DistributedChunkManager::onDataReceived);
         network.start();
 
         // Hook shutdown JVM
