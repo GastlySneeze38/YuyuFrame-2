@@ -38,7 +38,7 @@ public class P2PAgent {
             if (className == null || !className.startsWith("net/minecraft/")) return null;
 
             try {
-                return switch (className) {
+                byte[] result = switch (className) {
                     case "net/minecraft/server/level/ServerLevel"
                         -> ServerLevelTransformer.transform(classfileBuffer);
 
@@ -53,8 +53,14 @@ public class P2PAgent {
 
                     default -> null;
                 };
+                if (result != null) {
+                    System.out.println("[P2P Agent] Transformé : " + className
+                        + " (" + classfileBuffer.length + " → " + result.length + " octets)");
+                }
+                return result;
             } catch (Exception e) {
-                System.err.println("[P2P Agent] Erreur transformation " + className + " : " + e.getMessage());
+                System.err.println("[P2P Agent] ERREUR transformation " + className + " : " + e.getMessage());
+                e.printStackTrace(System.err);
                 return null; // Fallback sur classe originale
             }
         }
