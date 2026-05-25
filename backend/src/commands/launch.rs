@@ -59,12 +59,13 @@ pub async fn launch_game(
     .decorations(false)
     .build();
 
+    state.write().await.game_running = true;
+    let _ = app.emit("game_state", serde_json::json!({ "running": true }));
+
     let state_clone = state.inner().clone();
 
     tokio::spawn(async move {
         let started_at = chrono::Utc::now().timestamp();
-        state_clone.write().await.game_running = true;
-        let _ = app.emit("game_state", serde_json::json!({ "running": true }));
 
         let session_id: Option<i64> = {
             let s = state_clone.read().await;

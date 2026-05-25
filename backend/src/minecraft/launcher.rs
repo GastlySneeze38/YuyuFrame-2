@@ -369,8 +369,11 @@ pub async fn download_and_launch(
     // Tailer logs/latest.log — Minecraft route ses logs via log4j2 vers ce fichier
     // plutôt que vers stdout, donc on lit le fichier directement.
     let log_tailer = tokio::spawn(async move {
-        let mut pos: u64 = 0;
-        let mut last_len: u64 = 0;
+        // Démarrer à la fin du fichier existant pour ignorer les logs des sessions précédentes.
+        // Quand Minecraft recrée le fichier (taille < last_len), on repart de 0.
+        let current_end = tokio::fs::metadata(&log_path).await.map(|m| m.len()).unwrap_or(0);
+        let mut pos: u64 = current_end;
+        let mut last_len: u64 = current_end;
 
         loop {
             if let Ok(metadata) = tokio::fs::metadata(&log_path).await {
