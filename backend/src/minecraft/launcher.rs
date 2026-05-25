@@ -40,6 +40,7 @@ pub async fn download_and_launch(
     game_dir: &std::path::Path,
     app: tauri::AppHandle,
     state: SharedState,
+    p2p: bool,
 ) -> Result<()> {
     let mc_dir = minecraft_dir();
     tokio::fs::create_dir_all(game_dir).await?;
@@ -267,6 +268,9 @@ pub async fn download_and_launch(
     args.extend(["-cp".to_string(), classpath_str, main_class]);
     args.extend(build_game_args(&details, session, game_dir, &assets_dir, version_id));
     args.extend(extra_game_args);
+    if p2p {
+        args.push("--p2p".to_string());
+    }
 
     // Passe le timer Windows à 1ms (défaut : 15ms) pour réduire le jitter de scheduling
     #[cfg(target_os = "windows")]

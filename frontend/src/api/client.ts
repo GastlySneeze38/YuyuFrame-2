@@ -80,6 +80,8 @@ export const api = {
   launch: {
     start: (instanceId: string) =>
       invoke<void>('launch_game', { instanceId }),
+    startP2p: (instanceId: string) =>
+      invoke<void>('launch_game', { instanceId, p2p: true }),
   },
 
   sync: {

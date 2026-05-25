@@ -12,6 +12,7 @@ import Console from '@/pages/Console'
 import Sync from '@/pages/Sync'
 import Plans from '@/pages/Plans'
 import Stats from '@/pages/Stats'
+import Server from '@/pages/Server'
 import { useStore } from '@/stores/useStore'
 import { api } from '@/api/client'
 function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -63,6 +64,7 @@ export default function App() {
                   <Route path="/sync" element={<Sync />} />
                   <Route path="/plans" element={<Plans />} />
                   <Route path="/stats" element={<Stats />} />
+                  <Route path="/server" element={<Server />} />
                 </Routes>
               </AuthGuard>
             }
