@@ -11,6 +11,7 @@ use crate::state::{DownloadProgress, MinecraftSession, SharedState};
 use super::deps;
 use super::fabric;
 use super::forge;
+use super::p2p;
 use super::versions::{
     fetch_asset_index, fetch_version_details, fetch_version_list, Artifact, Library, VersionDetails,
 };
@@ -248,6 +249,43 @@ pub async fn download_and_launch(
             _ => (details.main_class.clone(), vec![], vec![], vec![]),
         };
 
+    // ── P2P setup ────────────────────────────────────────────────────────────
+    // Démarre le signaling, prépare le JAR mappé et l'arg -javaagent si p2p=true.
+    // Fait avant d'attendre les assets pour paralléliser le remapping (>1 min) avec leur DL.
+    let (effective_client_jar, p2p_jvm_args) = if p2p {
+        p2p::start_signaling();
+
+        // Copier rust_core.dll dans natives_dir pour que -Djava.library.path le trouve
+        let dll_name = if cfg!(target_os = "windows") { "rust_core.dll" } else { "librust_core.so" };
+        let dll_src = p2p::p2p_dir().join(dll_name);
+        if dll_src.exists() {
+            tokio::fs::copy(&dll_src, natives_dir.join(dll_name)).await.ok();
+        } else {
+            tracing::warn!("[P2P] {} manquant dans {} — JNI désactivé", dll_name, p2p::p2p_dir().display());
+        }
+
+        let mapped = p2p::ensure_mapped_jar(version_id, &client_jar, &client, &app, &java).await?;
+
+        let agent_jar = p2p::p2p_dir().join("p2p-agent.jar");
+        if !agent_jar.exists() {
+            return Err(anyhow!(
+                "p2p-agent.jar manquant dans {}\n  Copier P2P-Test/p2p-agent/build/p2p-agent.jar vers ce dossier",
+                p2p::p2p_dir().display()
+            ));
+        }
+
+        let peer_id  = uuid::Uuid::new_v4().to_string();
+        let agent_arg = format!(
+            "-javaagent:{}=peerId={},name={},server=ws://127.0.0.1:{}",
+            agent_jar.display(), peer_id, session.username, p2p::SIGNALING_PORT,
+        );
+
+        tracing::info!("[P2P] Agent : {}", agent_arg);
+        (mapped, vec![agent_arg])
+    } else {
+        (client_jar.clone(), vec![])
+    };
+
     // ── Attente des assets ────────────────────────────────────────────────────
     // Libs + loader terminés, on attend que les assets finissent avant de lancer.
     assets_task.await.map_err(|e| anyhow!("Tâche assets : {}", e))??;
@@ -260,17 +298,15 @@ pub async fn download_and_launch(
 
     let mut full_classpath: Vec<String> = extra_classpath;
     full_classpath.extend(classpath);
-    full_classpath.push(client_jar.to_string_lossy().to_string());
+    full_classpath.push(effective_client_jar.to_string_lossy().to_string());
     let classpath_str = dedup_classpath(full_classpath).join(classpath_sep);
 
     let mut args = build_jvm_args(ram_mb, &natives_dir, java_major);
     args.extend(extra_jvm_args);
+    args.extend(p2p_jvm_args);
     args.extend(["-cp".to_string(), classpath_str, main_class]);
     args.extend(build_game_args(&details, session, game_dir, &assets_dir, version_id));
     args.extend(extra_game_args);
-    if p2p {
-        args.push("--p2p".to_string());
-    }
 
     // Passe le timer Windows à 1ms (défaut : 15ms) pour réduire le jitter de scheduling
     #[cfg(target_os = "windows")]
