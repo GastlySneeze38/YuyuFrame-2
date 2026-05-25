@@ -47,6 +47,11 @@ public class EntityTransformer {
                                 "tickGhost", "(Ljava/lang/Object;)V", false);
                             mv.visitInsn(RETURN);
                             mv.visitLabel(notGhost);
+                            // PlayerSyncManager.onEntityTick(this)
+                            mv.visitVarInsn(ALOAD, 0);
+                            mv.visitMethodInsn(INVOKESTATIC,
+                                "com/p2pminecraft/runtime/PlayerSyncManager",
+                                "onEntityTick", "(Ljava/lang/Object;)V", false);
                             super.visitCode();
                         }
                     };

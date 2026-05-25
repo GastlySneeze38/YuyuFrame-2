@@ -42,6 +42,9 @@ public class DistributedChunkManager {
     }
 
     public static void afterChunkTick(int cx, int cz) {
+        // Applique les blocs reçus des pairs (thread serveur)
+        BlockSyncManager.flushPendingChanges();
+
         long now = System.currentTimeMillis();
         if (now - lastPositionBroadcast > 2000) {
             lastPositionBroadcast = now;
@@ -53,14 +56,20 @@ public class DistributedChunkManager {
             }
             System.out.println("[P2P] " + stats());
         }
-        // TODO Phase 2 : sérialiser les blocs dirty et appeler net.broadcastData(...)
     }
 
-    /** Reçoit et dispatche un message data d'un pair. */
+    /** Dispatche les messages data reçus d'un pair selon le type. */
     public static void onDataReceived(String fromId, byte[] data) {
-        // TODO Phase 2 : parser le type de message et appliquer (blocs, entités...)
-        System.out.println("[P2P] Data reçue de " + fromId.substring(0, Math.min(8, fromId.length()))
-            + " : " + data.length + " bytes");
+        if (data.length == 0) return;
+        byte type = data[0];
+        if (type == BlockSyncManager.TYPE_BLOCK) {
+            BlockSyncManager.handleReceived(data);
+        } else if (type == PlayerSyncManager.TYPE_PLAYER) {
+            PlayerSyncManager.handleReceived(fromId, data);
+        } else {
+            System.out.println("[P2P] Message inconnu (type=0x" + Integer.toHexString(type & 0xFF)
+                + ") de " + fromId.substring(0, Math.min(8, fromId.length())));
+        }
     }
 
     // ---- API appelée par P2PNetwork ----
