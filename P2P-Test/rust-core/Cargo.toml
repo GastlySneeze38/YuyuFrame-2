@@ -3,10 +3,15 @@ name = "rust-core"
 version = "0.1.0"
 edition = "2021"
 
-# Binaire de test standalone (cargo run -- Alice)
+# Peer standalone pour tester le réseau P2P sans Minecraft
 [[bin]]
 name = "peer"
 path = "src/main.rs"
+
+# Launcher de test : remap + signaling + launch Minecraft
+[[bin]]
+name = "launcher"
+path = "src/bin/launcher.rs"
 
 # Lib chargeable par Java via JNI
 [lib]
@@ -20,3 +25,4 @@ serde_json = "1"
 tungstenite = "0.24"
 uuid = { version = "1", features = ["v4"] }
 jni = "0.21"
+ureq = { version = "2", features = ["json"] }
