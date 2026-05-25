@@ -6,6 +6,7 @@ import org.objectweb.asm.commons.SimpleRemapper;
 import java.io.*;
 import java.util.*;
 import java.util.jar.*;
+import java.util.jar.Attributes;
 
 /**
  * Remappe un client.jar Minecraft obfusqué → noms Mojang (deobf).
@@ -176,8 +177,13 @@ public class MojangRemapper {
         SimpleRemapper remapper = new SimpleRemapper(asmMap);
         Set<String> written = new HashSet<>();
 
-        try (JarFile input    = new JarFile(inputPath);
-             JarOutputStream output = new JarOutputStream(new FileOutputStream(outputPath))) {
+        // Manifest minimal : supprime les digests Mojang qui invalideraient les classes remappées
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+
+        // false = ne pas vérifier les signatures à la lecture (évite une SecurityException sur l'input)
+        try (JarFile input    = new JarFile(inputPath, false);
+             JarOutputStream output = new JarOutputStream(new FileOutputStream(outputPath), manifest)) {
 
             Enumeration<JarEntry> entries = input.entries();
             int count = 0, skipped = 0;
@@ -185,6 +191,15 @@ public class MojangRemapper {
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
                 String name = entry.getName();
+
+                // Ignorer les fichiers de signature Mojang et le MANIFEST original
+                // (leurs digests ne correspondent plus après remapping des bytecodes)
+                if (name.startsWith("META-INF/") && (
+                        name.equals("META-INF/MANIFEST.MF") ||
+                        name.endsWith(".SF") || name.endsWith(".RSA") ||
+                        name.endsWith(".DSA") || name.endsWith(".EC"))) {
+                    continue;
+                }
 
                 try (InputStream is = input.getInputStream(entry)) {
                     byte[] data   = is.readAllBytes();
