@@ -308,6 +308,13 @@ pub async fn download_and_launch(
     args.extend(build_game_args(&details, session, game_dir, &assets_dir, version_id));
     args.extend(extra_game_args);
 
+    tracing::info!("Commande Java : {} {}", java, args.join(" "));
+
+    // Laisser à la fenêtre console le temps d'enregistrer ses listeners JS
+    // avant de spawner Java — évite de perdre les premières lignes de log
+    // quand tout est en cache et que le lancement est quasi-instantané.
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
     // Passe le timer Windows à 1ms (défaut : 15ms) pour réduire le jitter de scheduling
     #[cfg(target_os = "windows")]
     unsafe { timeBeginPeriod(1); }
@@ -330,7 +337,9 @@ pub async fn download_and_launch(
         tokio::spawn(async move {
             let mut line = String::new();
             while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
-                let _ = app_out.emit("game_log", serde_json::json!({ "line": line.trim_end(), "level": "out" }));
+                let trimmed = line.trim_end().to_string();
+                tracing::info!("[MC out] {}", trimmed);
+                let _ = app_out.emit("game_log", serde_json::json!({ "line": trimmed, "level": "out" }));
                 line.clear();
             }
         });
@@ -340,7 +349,9 @@ pub async fn download_and_launch(
         tokio::spawn(async move {
             let mut line = String::new();
             while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
-                let _ = app_err.emit("game_log", serde_json::json!({ "line": line.trim_end(), "level": "err" }));
+                let trimmed = line.trim_end().to_string();
+                tracing::info!("[MC err] {}", trimmed);
+                let _ = app_err.emit("game_log", serde_json::json!({ "line": trimmed, "level": "err" }));
                 line.clear();
             }
         });
@@ -348,7 +359,8 @@ pub async fn download_and_launch(
 
     // Clear progress — game is now running
     state.write().await.download_progress = None;
-    child.wait().await?;
+    let status = child.wait().await?;
+    tracing::info!("Minecraft terminé — code de sortie : {}", status);
 
     // Restaure la résolution du timer Windows
     #[cfg(target_os = "windows")]

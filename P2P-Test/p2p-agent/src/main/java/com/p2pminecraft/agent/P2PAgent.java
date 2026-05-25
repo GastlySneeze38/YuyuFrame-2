@@ -1,5 +1,6 @@
 package com.p2pminecraft.agent;
 
+import com.p2pminecraft.runtime.RuntimeInitializer;
 import com.p2pminecraft.transformer.*;
 
 import java.lang.instrument.ClassFileTransformer;
@@ -17,6 +18,10 @@ public class P2PAgent {
 
         AgentConfig config = AgentConfig.parse(agentArgs);
         System.out.println("[P2P Agent] peerId=" + config.peerId + " name=" + config.peerName);
+
+        // Démarre le réseau P2P dans un thread daemon — n'interfère pas avec le chargement Minecraft.
+        // startGame() n'existe plus en MC 1.21+ ; on initialise ici plutôt que via bytecode injection.
+        RuntimeInitializer.onGameStart();
 
         inst.addTransformer(new UnifiedTransformer(), false);
 

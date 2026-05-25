@@ -1,7 +1,6 @@
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.commons.ClassRemapper;
-import org.objectweb.asm.commons.SimpleRemapper;
 
 import java.io.*;
 import java.util.*;
@@ -20,8 +19,10 @@ public class MojangRemapper {
     private static final Map<String, String> classMap = new HashMap<>();
     // deobfDotName → obfDotName  (pour reconstruire les descripteurs obf depuis les types ProGuard)
     private static final Map<String, String> deobfToObf = new HashMap<>();
-    // Map complète pour ASM SimpleRemapper (classes + méthodes + champs)
+    // Map complète pour le remapper (classes + méthodes + champs)
     private static final Map<String, String> asmMap = new HashMap<>();
+    // obfInternalName → obfSuperInternalName (hiérarchie pour résolution des méthodes héritées)
+    private static final Map<String, String> superClassMap = new HashMap<>();
 
     public static void main(String[] args) throws Exception {
         if (args.length < 3) {
@@ -32,6 +33,10 @@ public class MojangRemapper {
         parseMappings(args[1]);
         System.out.println("[MojangRemapper] " + classMap.size() + " classes, "
                 + (asmMap.size() - classMap.size()) + " membres");
+
+        System.out.println("[MojangRemapper] Lecture de la hiérarchie de classes...");
+        buildHierarchy(args[0]);
+        System.out.println("[MojangRemapper] " + superClassMap.size() + " relations parent-enfant");
 
         System.out.println("[MojangRemapper] Remapping JAR...");
         remapJar(args[0], args[2]);
@@ -49,8 +54,6 @@ public class MojangRemapper {
             while ((line = br.readLine()) != null) {
                 String t = line.trim();
                 if (t.startsWith("#") || t.isEmpty()) continue;
-                // Ligne de classe : pas d'indentation, se termine par ":"
-                // ex: "net.minecraft.server.level.ServerLevel -> abc:"
                 if (!isIndented(line) && t.endsWith(":")) {
                     String[] parts = t.split(" -> ", 2);
                     if (parts.length != 2) continue;
@@ -72,7 +75,6 @@ public class MojangRemapper {
                 if (t.startsWith("#") || t.isEmpty()) continue;
 
                 if (!isIndented(line) && t.endsWith(":")) {
-                    // Ligne de classe : mise à jour du owner courant
                     String[] parts = t.split(" -> ", 2);
                     if (parts.length == 2) {
                         String obf = parts[1].replaceAll(":$", "").trim();
@@ -83,9 +85,6 @@ public class MojangRemapper {
 
                 if (!isIndented(line) || currentObfOwner == null) continue;
 
-                // Ligne de membre (indentée)
-                // ex: "    1:200:void tick(java.util.function.BooleanSupplier) -> a"
-                // ex: "    int field -> b"
                 String[] parts = t.split(" -> ", 2);
                 if (parts.length != 2) continue;
 
@@ -98,7 +97,6 @@ public class MojangRemapper {
                 if (lhs.contains("(")) {
                     parseMember(currentObfOwner, lhs, obfName);
                 } else {
-                    // Champ : "type nomChamp"
                     int sp = lhs.lastIndexOf(' ');
                     if (sp < 0) continue;
                     String deobfField = lhs.substring(sp + 1).trim();
@@ -109,7 +107,6 @@ public class MojangRemapper {
     }
 
     private static void parseMember(String obfOwner, String lhs, String obfMethodName) {
-        // lhs = "retType methodName(param1,param2,...)"
         int parenOpen  = lhs.indexOf('(');
         int parenClose = lhs.lastIndexOf(')');
         if (parenClose < parenOpen) return;
@@ -117,13 +114,11 @@ public class MojangRemapper {
         String beforeParen = lhs.substring(0, parenOpen).trim();
         String params      = lhs.substring(parenOpen + 1, parenClose);
 
-        // "retType methodName" → prendre le dernier token comme nom de méthode
         int sp = beforeParen.lastIndexOf(' ');
         if (sp < 0) return;
-        String retType        = beforeParen.substring(0, sp).trim();
+        String retType         = beforeParen.substring(0, sp).trim();
         String deobfMethodName = beforeParen.substring(sp + 1).trim();
 
-        // Construire le descripteur JVM en utilisant les noms OBFUSQUÉS
         String desc = buildObfDesc(retType, params);
         asmMap.put(obfOwner + "." + obfMethodName + desc, deobfMethodName);
     }
@@ -139,10 +134,6 @@ public class MojangRemapper {
         return sb.toString();
     }
 
-    /**
-     * Convertit un type Java (tel qu'écrit dans le ProGuard) en descripteur JVM obfusqué.
-     * Les noms de classes Minecraft sont traduits vers leur forme obfusquée via deobfToObf.
-     */
     private static String toObfDescriptor(String javaType) {
         int dims = 0;
         String t = javaType;
@@ -161,7 +152,6 @@ public class MojangRemapper {
             case "float"   -> "F";
             case "double"  -> "D";
             default -> {
-                // Classe Minecraft (nom déobfusqué dans ProGuard) → chercher le nom obf
                 String obf = deobfToObf.getOrDefault(t, t);
                 yield "L" + obf.replace('.', '/') + ";";
             }
@@ -170,18 +160,42 @@ public class MojangRemapper {
     }
 
     // -------------------------------------------------------------------------
+    // Hiérarchie de classes (pour résolution des méthodes héritées)
+    // -------------------------------------------------------------------------
+
+    // SimpleRemapper échoue quand une méthode est héritée : l'appel dans le
+    // bytecode utilise la sous-classe comme owner, mais le mapping est défini
+    // sur la super-classe. On lit la hiérarchie depuis le JAR pour propager
+    // les lookups vers les parents.
+    private static void buildHierarchy(String jarPath) throws Exception {
+        try (JarFile jar = new JarFile(jarPath, false)) {
+            Enumeration<JarEntry> entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                JarEntry entry = entries.nextElement();
+                if (!entry.getName().endsWith(".class")) continue;
+                try (InputStream is = jar.getInputStream(entry)) {
+                    ClassReader cr = new ClassReader(is.readAllBytes());
+                    String child = cr.getClassName();
+                    String superName = cr.getSuperName();
+                    if (superName != null && !superName.equals("java/lang/Object")) {
+                        superClassMap.put(child, superName);
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Remapping du JAR
     // -------------------------------------------------------------------------
 
     private static void remapJar(String inputPath, String outputPath) throws Exception {
-        SimpleRemapper remapper = new SimpleRemapper(asmMap);
+        HierarchyRemapper remapper = new HierarchyRemapper();
         Set<String> written = new HashSet<>();
 
-        // Manifest minimal : supprime les digests Mojang qui invalideraient les classes remappées
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
 
-        // false = ne pas vérifier les signatures à la lecture (évite une SecurityException sur l'input)
         try (JarFile input    = new JarFile(inputPath, false);
              JarOutputStream output = new JarOutputStream(new FileOutputStream(outputPath), manifest)) {
 
@@ -192,8 +206,6 @@ public class MojangRemapper {
                 JarEntry entry = entries.nextElement();
                 String name = entry.getName();
 
-                // Ignorer les fichiers de signature Mojang et le MANIFEST original
-                // (leurs digests ne correspondent plus après remapping des bytecodes)
                 if (name.startsWith("META-INF/") && (
                         name.equals("META-INF/MANIFEST.MF") ||
                         name.endsWith(".SF") || name.endsWith(".RSA") ||
@@ -211,7 +223,6 @@ public class MojangRemapper {
                         } catch (Exception e) {
                             System.err.println("\n  Warning: remap " + name + " : " + e.getMessage());
                         }
-                        // Renommer l'entrée JAR si la classe est mappée
                         String internalName = name.substring(0, name.length() - 6);
                         String mapped = classMap.get(internalName);
                         if (mapped != null) outName = mapped + ".class";
@@ -238,11 +249,42 @@ public class MojangRemapper {
         }
     }
 
-    private static byte[] remapClass(byte[] bytecode, SimpleRemapper remapper) {
+    private static byte[] remapClass(byte[] bytecode, HierarchyRemapper remapper) {
         ClassReader cr = new ClassReader(bytecode);
         ClassWriter cw = new ClassWriter(0);
         cr.accept(new ClassRemapper(cw, remapper), 0);
         return cw.toByteArray();
+    }
+
+    // -------------------------------------------------------------------------
+    // Remapper avec résolution de l'héritage
+    // -------------------------------------------------------------------------
+
+    private static class HierarchyRemapper extends org.objectweb.asm.commons.Remapper {
+
+        @Override
+        public String map(String internalName) {
+            return asmMap.getOrDefault(internalName, internalName);
+        }
+
+        @Override
+        public String mapFieldName(String owner, String name, String descriptor) {
+            String result = asmMap.get(owner + "." + name);
+            if (result != null) return result;
+            String parent = superClassMap.get(owner);
+            if (parent != null) return mapFieldName(parent, name, descriptor);
+            return name;
+        }
+
+        @Override
+        public String mapMethodName(String owner, String name, String descriptor) {
+            String result = asmMap.get(owner + "." + name + descriptor);
+            if (result != null) return result;
+            // Méthode non trouvée sur owner → chercher dans la super-classe
+            String parent = superClassMap.get(owner);
+            if (parent != null) return mapMethodName(parent, name, descriptor);
+            return name;
+        }
     }
 
     private static boolean isIndented(String line) {

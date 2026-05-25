@@ -390,6 +390,7 @@ pub fn instance_claim_unclaimed(conn: &Connection, user_id: i64) -> Result<()> {
 // ── Play sessions ──────────────────────────────────────────────────────────────
 
 pub struct SessionRow {
+    #[allow(dead_code)]
     pub id: i64,
     pub instance_name: String,
     pub mc_version: String,
