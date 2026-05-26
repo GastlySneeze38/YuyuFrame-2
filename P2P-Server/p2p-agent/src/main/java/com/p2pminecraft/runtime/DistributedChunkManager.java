@@ -42,8 +42,9 @@ public class DistributedChunkManager {
     }
 
     public static void afterChunkTick(int cx, int cz) {
-        // Applique les blocs reçus des pairs (thread serveur)
+        // Applique les blocs reçus + commandes ghost (thread serveur)
         BlockSyncManager.flushPendingChanges();
+        GhostManager.flush();
 
         long now = System.currentTimeMillis();
         if (now - lastPositionBroadcast > 2000) {
@@ -95,6 +96,7 @@ public class DistributedChunkManager {
     public static void removePeer(String peerId) {
         fallbackPeers.remove(peerId);
         if (RustBridge.NATIVE_LOADED) RustBridge.removePeer(peerId);
+        GhostManager.removeGhost(peerId);
     }
 
     public static int myChunkCount() {

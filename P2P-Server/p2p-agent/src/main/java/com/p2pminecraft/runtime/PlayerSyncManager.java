@@ -66,10 +66,10 @@ public class PlayerSyncManager {
 
         remotePlayers.put(fromId, new double[]{x, y, z, yaw, pitch});
 
-        System.out.printf("[P2P] Joueur %s à %.1f,%.1f,%.1f (yaw=%.0f)%n",
-            fromId.substring(0, Math.min(8, fromId.length())), x, y, z, (double) yaw);
+        System.out.printf("[P2P] Joueur %s à %.1f,%.1f,%.1f%n",
+            fromId.substring(0, Math.min(8, fromId.length())), x, y, z);
 
-        // TODO Phase 4 : déplacer/spawner l'entité ghost correspondante
+        GhostManager.updateRemotePlayer(fromId, x, y, z, yaw, pitch);
     }
 
     public static Map<String, double[]> getRemotePlayers() {

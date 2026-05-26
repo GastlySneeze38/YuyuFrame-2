@@ -1,921 +1,234 @@
-# Minecraft P2P Distributed Server Launcher
+# YuyuFrame — Serveur Minecraft P2P Distribué
 
-## 🎮 Vue d'ensemble
+## Vue d'ensemble
 
-Un launcher Minecraft révolutionnaire qui permet de créer des serveurs où **la charge de calcul est distribuée entre tous les joueurs connectés** via P2P (peer-to-peer). Au lieu d'avoir un serveur central qui calcule tout, chaque joueur calcule uniquement les zones du monde qu'il explore.
-
-### Concept clé
+YuyuFrame est un système qui permet à plusieurs joueurs Minecraft de partager la charge de simulation du monde sans serveur central. Chaque joueur simule la portion du monde qui lui est attribuée, diffuse les changements aux autres, et reçoit en retour les changements des portions qu'il ne simule pas. Du point de vue de chaque joueur, le monde est complet et cohérent.
 
 ```
-Serveur classique:
-┌──────────────┐
-│   Serveur    │ ← 100% CPU pour calculer tout le monde
-│   Central    │
-└──────────────┘
-       ↓
-   4 joueurs
+Serveur classique :
+┌──────────────────┐
+│  Serveur central │  ← simule tout le monde, seul
+└──────────────────┘
+         ↓
+   tous les joueurs reçoivent
 
-Système P2P distribué:
-┌────┐  ┌────┐  ┌────┐  ┌────┐
-│ P1 │  │ P2 │  │ P3 │  │ P4 │ ← Chacun 25% CPU
-└────┘  └────┘  └────┘  └────┘
-  ↓       ↓       ↓       ↓
-Zone A  Zone B  Zone C  Zone D
+YuyuFrame :
+┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
+│ Pair A │  │ Pair B │  │ Pair C │  │ Pair D │
+│ zone A │  │ zone B │  │ zone C │  │ zone D │
+└────────┘  └────────┘  └────────┘  └────────┘
+     ↕           ↕           ↕           ↕
+              deltas P2P entre pairs
 ```
 
-### Caractéristiques
-
-✅ **Distribution dynamique de charge** : Plus il y a de joueurs, moins chacun consomme de ressources  
-✅ **Calcul à la demande** : Seules les zones actives sont calculées  
-✅ **Stockage centralisé** : Les fichiers du monde restent sur un serveur central léger  
-✅ **Scalabilité automatique** : Le système s'adapte au nombre de joueurs  
-✅ **Économie de ressources** : Zones vides = 0% CPU  
+La charge est distribuée proportionnellement au nombre de joueurs. Plus il y a de joueurs, moins chacun simule. Un joueur seul simule tout. Dix joueurs répartis simulent chacun un dixième.
 
 ---
 
-## 🏗️ Architecture Technique
+## Principe de fonctionnement
 
-### Composants principaux
+### L'unité de simulation : le quadrant
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   LAUNCHER (Client)                      │
-│  - Découverte des peers                                  │
-│  - Injection de l'agent Java                             │
-│  - Configuration P2P                                     │
-│  - Lancement de Minecraft                                │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│              AGENT JAVA (Modification Runtime)           │
-│  - Injection ASM dans les classes Minecraft              │
-│  - Interception des ticks de chunks                      │
-│  - Gestion de la distribution de charge                  │
-│  - Synchronisation des entités                           │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                  RÉSEAU P2P (WebRTC/Socket)              │
-│  - Communication entre peers                             │
-│  - Synchronisation d'état                                │
-│  - Transfert de chunks                                   │
-│  - Broadcast des entités                                 │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│            SERVEUR CENTRAL (Stockage uniquement)         │
-│  - Fichiers du monde (.mca, level.dat)                  │
-│  - Base de données joueurs                               │
-│  - Authentification                                      │
-│  - Pas de calcul de jeu                                  │
-└─────────────────────────────────────────────────────────┘
-```
+Le monde n'est pas distribué au niveau du chunk entier mais au niveau du quadrant. Chaque chunk Minecraft de seize blocs sur seize est subdivisé en quatre quadrants de huit blocs sur huit. Cette granularité plus fine permet une distribution équitable même quand plusieurs joueurs se trouvent dans la même zone.
+
+### L'attribution : déterministe et sans consensus
+
+Chaque pair calcule localement qui doit simuler chaque quadrant en appliquant la même règle : le quadrant appartient au pair dont la position est la plus proche du centre géométrique du quadrant. En cas d'égalité exacte, l'identifiant du pair sert de départage. Cette règle est identique sur toutes les machines — le résultat est le même partout sans qu'aucune communication ne soit nécessaire pour s'accorder.
+
+### Les deltas : ce qui circule sur le réseau
+
+À chaque tick (vingt fois par seconde), chaque pair capture les changements produits par sa simulation — blocs modifiés, entités déplacées, spawns, morts — et les diffuse aux autres pairs sous forme de delta. Les pairs reçoivent ces deltas et les appliquent directement dans leur représentation locale du monde. Quand rien ne change, aucun delta n'est émis. Le trafic réseau est proportionnel à l'activité réelle du monde, pas à son existence.
+
+### La confiance mutuelle
+
+YuyuFrame est conçu pour des sessions entre joueurs qui se connaissent et se font confiance. Il n'y a pas d'anticheat, pas de validation des deltas reçus. Un pair est autorité absolue sur ses quadrants. Ce choix délibéré rend l'architecture radicalement plus simple que tout système avec validation distribuée.
 
 ---
 
-## 🧩 Composants détaillés
+## Architecture technique
 
-### 1. Launcher (Electron/Node.js ou Java)
+YuyuFrame est constitué de quatre couches superposées, chacune documentée séparément.
 
-**Responsabilités :**
-- Interface utilisateur pour configuration
-- Découverte des peers disponibles (DHT, serveur de signaling)
-- Téléchargement de l'agent Java et des dépendances
-- Configuration des arguments JVM
-- Lancement du client Minecraft avec l'agent injecté
-
-**Technologies suggérées :**
-- Electron + React pour l'UI
-- Node.js pour la logique launcher
-- WebRTC pour la découverte P2P initiale
-
-```javascript
-// Exemple de structure
-class P2PMinecraftLauncher {
-  async launch(config) {
-    // 1. Découvrir les peers
-    const peers = await this.discoverPeers(config.serverCode);
-    
-    // 2. Télécharger/vérifier l'agent
-    await this.ensureAgent();
-    
-    // 3. Configurer le réseau P2P
-    const p2pConfig = await this.setupP2P(peers);
-    
-    // 4. Lancer Minecraft
-    await this.launchMinecraft({
-      javaAgent: './agents/distributed-agent.jar',
-      p2pBootstrap: p2pConfig,
-      worldServer: config.worldServerUrl
-    });
-  }
-}
+```
+┌────────────────────────────────────────────────────┐
+│  Couche 4 — Border Sync                            │
+│  Ownership physic-aware pour fluides et redstone   │
+│  Ghost layer en lecture seule pour les entités     │
+└────────────────────────────────────────────────────┘
+                        ↕
+┌────────────────────────────────────────────────────┐
+│  Couche 3 — Simulation locale et deltas            │
+│  Java Agent + Mixin standalone                     │
+│  Serveur intégré Minecraft (simulation sélective)  │
+│  Cœur Rust (deltas, JNI, libp2p)                  │
+│  Injection directe dans ClientWorld               │
+└────────────────────────────────────────────────────┘
+                        ↕
+┌────────────────────────────────────────────────────┐
+│  Couche 2 — Ownership Engine                       │
+│  Attribution des quadrants par distance minimale   │
+│  Gestion des transferts d'entités                  │
+│  Détection des phénomènes physiques aux frontières │
+└────────────────────────────────────────────────────┘
+                        ↕
+┌────────────────────────────────────────────────────┐
+│  Couche 1 — Connectivité P2P                       │
+│  libp2p (NAT traversal, hole punching)             │
+│  Relay server léger (signaling uniquement)         │
+│  Tunnel chiffré Noise Protocol                     │
+└────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 2. Agent Java (Core du système)
+## Les composants
 
-**Rôle :** Modifier le comportement de Minecraft en temps réel via injection de bytecode
+### Le Java Agent
 
-**Classes Minecraft à modifier :**
+YuyuFrame ne s'installe pas comme un mod. Il s'injecte dans la JVM Minecraft via un argument de démarrage standard :
 
-```java
-// Classes critiques à intercepter
-net.minecraft.server.level.ServerLevel           // Tick du monde
-net.minecraft.server.level.ServerChunkCache      // Gestion des chunks
-net.minecraft.world.level.chunk.LevelChunk       // Tick individuel de chunk
-net.minecraft.server.level.ChunkMap              // Chargement/déchargement
-net.minecraft.world.entity.Entity                // Tick des entités
-net.minecraft.world.level.block.entity.BlockEntity // Tick des tile entities
+```
+java -javaagent:yuyuframe.jar -jar minecraft.jar
 ```
 
-**Architecture de l'agent :**
+Le Java Agent s'exécute avant Minecraft, initialise Mixin standalone avec les mappings d'obfuscation de la version Minecraft détectée, installe les hooks sur les méthodes critiques du jeu, et charge le cœur Rust. Minecraft démarre ensuite normalement, déjà instrumenté, sans qu'aucun fichier n'ait été modifié.
 
-```java
-public class DistributedMinecraftAgent {
-    
-    // Point d'entrée de l'agent
-    public static void premain(String args, Instrumentation inst) {
-        // Enregistrer les transformateurs de classes
-        inst.addTransformer(new ServerLevelTransformer());
-        inst.addTransformer(new ChunkTickTransformer());
-        inst.addTransformer(new EntityTickTransformer());
-        
-        // Initialiser le système P2P
-        P2PNetwork.initialize(parseArgs(args));
-    }
-}
+### Mixin standalone
 
-// Transformateur pour ServerLevel.tick()
-public class ServerLevelTransformer implements ClassFileTransformer {
-    
-    @Override
-    public byte[] transform(ClassLoader loader, String className, 
-                          Class<?> classBeingRedefined,
-                          ProtectionDomain protectionDomain,
-                          byte[] classfileBuffer) {
-        
-        if (className.equals("net/minecraft/server/level/ServerLevel")) {
-            ClassReader reader = new ClassReader(classfileBuffer);
-            ClassNode classNode = new ClassNode();
-            reader.accept(classNode, 0);
-            
-            // Trouver et modifier la méthode tick()
-            for (MethodNode method : classNode.methods) {
-                if (method.name.equals("tick")) {
-                    injectDistributedLogic(method);
-                }
-            }
-            
-            ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
-            classNode.accept(writer);
-            return writer.toByteArray();
-        }
-        
-        return null; // Pas de modification
-    }
-    
-    private void injectDistributedLogic(MethodNode method) {
-        // Injecter au début de la méthode :
-        // if (!DistributedChunkManager.shouldTickWorld(this)) return;
-        
-        InsnList injection = new InsnList();
-        injection.add(new VarInsnNode(ALOAD, 0)); // this
-        injection.add(new MethodInsnNode(
-            INVOKESTATIC,
-            "com/p2pminecraft/DistributedChunkManager",
-            "shouldTickWorld",
-            "(Lnet/minecraft/server/level/ServerLevel;)Z",
-            false
-        ));
-        
-        LabelNode continueLabel = new LabelNode();
-        injection.add(new JumpInsnNode(IFNE, continueLabel));
-        injection.add(new InsnNode(RETURN)); // Skip si false
-        injection.add(continueLabel);
-        
-        method.instructions.insert(injection);
-    }
-}
-```
+Mixin est la bibliothèque qui installe les hooks dans le bytecode Minecraft. Elle est utilisée ici sans Fabric Loader — comme bibliothèque autonome initialisée par le Java Agent. Elle gère l'obfuscation automatiquement via les MojMap et garantit que les hooks sont installés aux bons endroits même entre versions de Minecraft. Les hooks sont installés sur deux composants distincts : le serveur intégré pour contrôler ce qu'il simule et capturer les changements, et `ClientWorld` pour recevoir les deltas des pairs.
+
+### Le cœur Rust
+
+Le cœur Rust est une bibliothèque native chargée via JNI. C'est lui qui gère tout ce qui touche au réseau P2P et aux deltas. Il contient l'ownership engine, le pipeline libp2p pour la communication entre pairs, la sérialisation et désérialisation binaire des deltas, et la file d'attente des deltas entrants. Il communique avec le code Java via un pont JNI minimal — deux appels par tick, un en début et un en fin.
+
+### Le serveur intégré Minecraft
+
+Quand un joueur ouvre un monde solo dans Minecraft, un serveur intégré s'exécute dans la même JVM. YuyuFrame utilise ce serveur intégré comme moteur de simulation pour les quadrants owné par ce pair. Il simule uniquement ces quadrants — les quadrants des autres pairs sont gelés pour lui. Il ne sait pas que YuyuFrame existe. Il envoie ses résultats au client local via le protocole Minecraft normal.
+
+### ClientWorld
+
+`ClientWorld` est la représentation du monde côté client Minecraft — c'est l'objet que le renderer lit pour afficher ce que le joueur voit. YuyuFrame alimente `ClientWorld` depuis deux sources : le serveur intégré local pour les quadrants simulés par ce pair, et les deltas des pairs reçus via libp2p pour tous les autres quadrants. Le renderer ne voit qu'un monde cohérent et complet, sans savoir que certaines parties viennent de machines distantes.
+
+### Le relay server
+
+Le relay server est le seul composant d'infrastructure externe. Son rôle est strictement limité au signaling initial : permettre à deux pairs de se trouver sur internet et d'échanger leurs adresses pour établir une connexion directe. Une fois la connexion établie entre les pairs, le relay n'est plus impliqué dans le flux de données de jeu. Il est conçu pour être extrêmement léger — quelques kilooctets échangés au démarrage d'une session, puis silence.
 
 ---
 
-### 3. Gestionnaire de chunks distribués
+## Ce qui circule sur le réseau
 
-**Algorithme de distribution intelligente :**
+### Les deltas de simulation
 
-```java
-public class DistributedChunkManager {
-    
-    // Qui calcule quel chunk ?
-    private static ConcurrentHashMap<ChunkPos, UUID> chunkOwnership = new ConcurrentHashMap<>();
-    
-    // Chunks que JE calcule
-    private static Set<ChunkPos> myChunks = ConcurrentHashMap.newKeySet();
-    
-    // Mon UUID de joueur
-    private static UUID myPlayerId;
-    
-    /**
-     * Détermine si ce client doit calculer le tick de ce chunk
-     * 
-     * Règles :
-     * - Aucun joueur dans les 10 chunks ? → personne ne calcule
-     * - 1 joueur seul ? → il calcule tout autour de lui
-     * - Plusieurs joueurs ? → distribution par hash consistant
-     */
-    public static boolean shouldTickChunk(LevelChunk chunk) {
-        ChunkPos pos = chunk.getPos();
-        
-        // Trouver tous les joueurs dans la zone de rendu
-        List<ServerPlayer> nearbyPlayers = findPlayersInRange(pos, VIEW_DISTANCE);
-        
-        if (nearbyPlayers.isEmpty()) {
-            // Personne ici = pas de calcul (économie CPU)
-            return false;
-        }
-        
-        if (nearbyPlayers.size() == 1) {
-            // Un seul joueur = il calcule tout
-            UUID playerId = nearbyPlayers.get(0).getUUID();
-            chunkOwnership.put(pos, playerId);
-            return playerId.equals(myPlayerId);
-        }
-        
-        // Plusieurs joueurs = distribuer équitablement
-        return assignChunkOwner(pos, nearbyPlayers);
-    }
-    
-    /**
-     * Algorithme de distribution par hash consistant
-     * Garantit que le même chunk est toujours assigné au même joueur
-     * (tant que les joueurs ne bougent pas)
-     */
-    private static boolean assignChunkOwner(ChunkPos pos, List<ServerPlayer> players) {
-        // Hash du chunk pour déterminer l'ownership
-        long hash = hashChunkPos(pos);
-        
-        // Sélectionner un joueur basé sur le hash
-        int playerIndex = (int) (Math.abs(hash) % players.size());
-        UUID assignedPlayer = players.get(playerIndex).getUUID();
-        
-        // Mettre à jour la table d'ownership
-        chunkOwnership.put(pos, assignedPlayer);
-        
-        // Est-ce que c'est moi qui doit calculer ?
-        boolean isMine = assignedPlayer.equals(myPlayerId);
-        
-        if (isMine) {
-            myChunks.add(pos);
-        } else {
-            myChunks.remove(pos);
-        }
-        
-        return isMine;
-    }
-    
-    /**
-     * Hash consistant pour stabilité
-     */
-    private static long hashChunkPos(ChunkPos pos) {
-        // Utiliser MurmurHash ou similaire pour bonne distribution
-        long x = pos.x;
-        long z = pos.z;
-        return x * 31 + z * 17;
-    }
-    
-    /**
-     * Trouver les joueurs dans un rayon autour d'un chunk
-     */
-    private static List<ServerPlayer> findPlayersInRange(ChunkPos center, int radius) {
-        List<ServerPlayer> result = new ArrayList<>();
-        
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            ChunkPos playerChunk = new ChunkPos(player.blockPosition());
-            
-            int dx = Math.abs(playerChunk.x - center.x);
-            int dz = Math.abs(playerChunk.z - center.z);
-            
-            if (dx <= radius && dz <= radius) {
-                result.add(player);
-            }
-        }
-        
-        return result;
-    }
-}
-```
+Les deltas constituent la quasi-totalité du trafic de YuyuFrame. Un delta contient les changements de blocs, les mouvements d'entités, les spawns, les morts, et les mises à jour de tile entities produits par la simulation locale d'un pair pendant un tick. Si rien n'a changé, le delta est vide et rien n'est envoyé.
+
+En conditions normales de jeu, le trafic est de l'ordre de quelques kilooctets par seconde par pair. Les pics surviennent lors d'explosions ou de farm à mobs denses, mais restent dans des limites confortables pour une connexion résidentielle moderne.
+
+### Le ghost layer
+
+Le ghost layer est un échange léger entre pairs adjacents — ceux qui partagent une frontière entre leurs quadrants. Chaque pair envoie l'état de ses deux blocs de bordure à ses voisins une fois par tick. Les voisins utilisent ces données comme contexte pour le pathfinding et la collision de leurs entités, sans simuler ces blocs. Le ghost layer ne modifie pas l'état du monde — c'est une lecture seule.
+
+### Le signaling initial
+
+Au démarrage d'une session, les pairs échangent quelques dizaines d'octets via le relay server pour se trouver, puis s'envoient un snapshot des chunks autour de leur position respective pour synchroniser leur état initial. Ce snapshot, en format Anvil natif Minecraft, est le seul transfert de données volumineuses — il n'a lieu qu'une fois par pair par session.
 
 ---
 
-### 4. Synchronisation des entités
+## Gestion des cas limites
 
-Les entités (mobs, items, projectiles) doivent être visibles même si calculées par un autre peer.
+### Joueurs dans la même zone
 
-```java
-public class EntitySyncSystem {
-    
-    // Entités que je calcule (ownership)
-    private Set<Integer> myEntities = ConcurrentHashMap.newKeySet();
-    
-    // Entités "ghost" (calculées ailleurs, juste affichées)
-    private Set<Integer> ghostEntities = ConcurrentHashMap.newKeySet();
-    
-    /**
-     * Intercepte le tick d'une entité
-     */
-    public static boolean shouldTickEntity(Entity entity) {
-        int entityId = entity.getId();
-        ChunkPos chunkPos = entity.chunkPosition();
-        
-        // Vérifier qui possède le chunk de l'entité
-        UUID chunkOwner = DistributedChunkManager.getChunkOwner(chunkPos);
-        
-        if (chunkOwner == null) {
-            // Chunk non chargé, skip
-            return false;
-        }
-        
-        boolean isMine = chunkOwner.equals(myPlayerId);
-        
-        if (isMine) {
-            myEntities.add(entityId);
-            ghostEntities.remove(entityId);
-            return true; // Je calcule
-        } else {
-            myEntities.remove(entityId);
-            ghostEntities.add(entityId);
-            return false; // Un autre calcule
-        }
-    }
-    
-    /**
-     * Broadcast mes entités aux autres peers
-     * Appelé ~20 fois par seconde
-     */
-    public void broadcastMyEntities() {
-        List<EntityUpdate> updates = new ArrayList<>();
-        
-        for (int entityId : myEntities) {
-            Entity entity = getEntityById(entityId);
-            if (entity == null) continue;
-            
-            EntityUpdate update = new EntityUpdate();
-            update.entityId = entityId;
-            update.type = entity.getType().toString();
-            update.x = entity.getX();
-            update.y = entity.getY();
-            update.z = entity.getZ();
-            update.vx = entity.getDeltaMovement().x;
-            update.vy = entity.getDeltaMovement().y;
-            update.vz = entity.getDeltaMovement().z;
-            update.yaw = entity.getYRot();
-            update.pitch = entity.getXRot();
-            
-            updates.add(update);
-        }
-        
-        // Envoyer via P2P aux joueurs proches
-        P2PNetwork.broadcast(updates, getNearbyPeers());
-    }
-    
-    /**
-     * Recevoir les updates d'entités des autres peers
-     */
-    public void receiveEntityUpdate(EntityUpdate update) {
-        if (ghostEntities.contains(update.entityId)) {
-            // Mettre à jour l'entité ghost
-            Entity entity = getEntityById(update.entityId);
-            
-            if (entity == null) {
-                // Créer l'entité en mode ghost
-                entity = createGhostEntity(update);
-            }
-            
-            // Appliquer la position
-            entity.setPos(update.x, update.y, update.z);
-            entity.setDeltaMovement(update.vx, update.vy, update.vz);
-            entity.setYRot(update.yaw);
-            entity.setXRot(update.pitch);
-            
-            // Important : désactiver l'AI et la physique
-            entity.setNoAi(true);
-            entity.noPhysics = true;
-        }
-    }
-}
+Quand plusieurs joueurs sont proches, leurs zones de simulation se chevauchent. L'ownership engine attribue chaque quadrant au joueur le plus proche, produisant une distribution équitable et continue. Les quadrants aux frontières sont attribués de façon déterministe sans communication entre pairs.
 
-// Structure de message
-class EntityUpdate {
-    int entityId;
-    String type;
-    double x, y, z;
-    double vx, vy, vz;
-    float yaw, pitch;
-    long timestamp;
-}
-```
+### Physique aux frontières de quadrants
+
+Les phénomènes physiques qui traversent une frontière — eau qui coule, redstone qui propage, piston qui pousse — sont traités par l'ownership engine physic-aware. Avant chaque tick, il détecte ces phénomènes et étend temporairement l'ownership du pair concerné pour englober toute la zone affectée. Un seul pair simule la chaîne physique complète. Les autres reçoivent le résultat via delta.
+
+### Déconnexion d'un pair
+
+Quand un pair se déconnecte, ses quadrants sont redistribués aux pairs les plus proches par l'ownership engine. Le nouveau propriétaire charge le dernier état connu depuis le disque local. Les modifications effectuées par le pair déconnecté depuis la dernière sauvegarde sont perdues, exactement comme lors d'un crash de serveur classique. Une fenêtre de grâce de trente secondes permet au pair de se reconnecter sans redistribution.
+
+### Pair seul dans une zone
+
+Un pair seul simule l'intégralité des chunks dans son rayon de vue — comportement identique à un monde solo. YuyuFrame n'ajoute aucun overhead de simulation dans ce cas.
 
 ---
 
-### 5. Réseau P2P
+## Performance
 
-**Protocole de communication :**
+### Distribution de la charge
 
-```java
-public class P2PNetwork {
-    
-    // Connexions aux autres peers
-    private Map<UUID, PeerConnection> peers = new ConcurrentHashMap<>();
-    
-    // Types de messages
-    enum MessageType {
-        CHUNK_OWNERSHIP,      // Claim d'ownership de chunks
-        ENTITY_UPDATE,        // État d'entités
-        BLOCK_CHANGE,         // Changement de bloc
-        PLAYER_POSITION,      // Position du joueur
-        CHUNK_REQUEST,        // Demande de données chunk
-        CHUNK_DATA,           // Envoi de données chunk
-        HANDSHAKE,            // Connexion initiale
-        HEARTBEAT             // Keep-alive
-    }
-    
-    /**
-     * Initialisation du réseau P2P
-     */
-    public static void initialize(P2PConfig config) {
-        // Se connecter au serveur de signaling
-        SignalingServer signaling = new SignalingServer(config.signalingUrl);
-        
-        // Obtenir la liste des peers
-        List<PeerInfo> peers = signaling.discoverPeers(config.serverId);
-        
-        // Établir connexions WebRTC ou TCP
-        for (PeerInfo peer : peers) {
-            connectToPeer(peer);
-        }
-        
-        // Lancer le thread de synchronisation
-        startSyncThread();
-    }
-    
-    /**
-     * Thread de synchronisation (20 ticks/sec)
-     */
-    private static void startSyncThread() {
-        ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
-        
-        executor.scheduleAtFixedRate(() -> {
-            // Broadcast ownership de chunks
-            broadcastChunkOwnership();
-            
-            // Broadcast entités
-            EntitySyncSystem.broadcastMyEntities();
-            
-            // Heartbeat
-            sendHeartbeat();
-            
-        }, 0, 50, TimeUnit.MILLISECONDS); // 20 Hz
-    }
-    
-    /**
-     * Envoyer un message à tous les peers proches
-     */
-    public static void broadcast(Object message, List<UUID> targetPeers) {
-        byte[] serialized = serialize(message);
-        
-        for (UUID peerId : targetPeers) {
-            PeerConnection peer = peers.get(peerId);
-            if (peer != null && peer.isConnected()) {
-                peer.send(serialized);
-            }
-        }
-    }
-    
-    /**
-     * Sérialisation binaire efficace
-     */
-    private static byte[] serialize(Object obj) {
-        // Utiliser Protocol Buffers ou MessagePack pour efficacité
-        // Exemple avec MessagePack :
-        return MessagePack.pack(obj);
-    }
-}
+La charge de simulation est distribuée proportionnellement entre les pairs actifs. Avec des joueurs répartis dans des zones distinctes, chacun simule approximativement un N-ième du monde actif, N étant le nombre de joueurs. L'efficacité de la distribution dépend de la dispersion géographique des joueurs — des joueurs groupés bénéficient moins de la distribution que des joueurs dispersés.
 
-// Configuration P2P
-class P2PConfig {
-    String signalingUrl;     // Serveur de découverte
-    String serverId;         // ID du serveur à rejoindre
-    int maxPeers;            // Limite de connexions P2P
-    boolean useWebRTC;       // WebRTC vs TCP/UDP
-}
+### Latence perçue
 
-// Info sur un peer
-class PeerInfo {
-    UUID playerId;
-    String address;
-    int port;
-    String webrtcOffer;  // Si WebRTC
-}
-```
+La latence entre deux pairs détermine le délai avec lequel les actions de l'un sont visibles chez l'autre. Avec une latence de cinquante millisecondes, un changement est visible en un à deux ticks — imperceptible. YuyuFrame interpole les positions des entités entre les deltas reçus pour lisser les mouvements même en cas de latence variable.
+
+### Bande passante
+
+La bande passante consommée par YuyuFrame est très inférieure à celle d'un serveur Minecraft classique. La compression différentielle par delta, combinée à l'absence totale de trafic quand rien ne change, produit un flux réseau minimal. Une connexion fibre résidentielle standard supporte confortablement une session YuyuFrame avec dix pairs actifs.
 
 ---
 
-### 6. Load Balancer (Rééquilibrage dynamique)
-
-```java
-public class LoadBalancer {
-    
-    /**
-     * Rééquilibrer la charge toutes les 5 secondes
-     */
-    public void rebalance() {
-        // Calculer la charge de chaque peer
-        Map<UUID, Integer> peerLoads = new HashMap<>();
-        
-        for (UUID peerId : connectedPeers) {
-            int chunkCount = countChunksForPeer(peerId);
-            peerLoads.put(peerId, chunkCount);
-        }
-        
-        // Trouver le plus chargé et le moins chargé
-        UUID overloaded = Collections.max(peerLoads.entrySet(), 
-            Map.Entry.comparingByValue()).getKey();
-        UUID underloaded = Collections.min(peerLoads.entrySet(), 
-            Map.Entry.comparingByValue()).getKey();
-        
-        int maxLoad = peerLoads.get(overloaded);
-        int minLoad = peerLoads.get(underloaded);
-        
-        // Si déséquilibre > 30%, redistribuer
-        float imbalance = (float)(maxLoad - minLoad) / maxLoad;
-        
-        if (imbalance > 0.3f) {
-            // Transférer ~25% des chunks du plus chargé vers le moins chargé
-            int toTransfer = (maxLoad - minLoad) / 4;
-            transferChunks(overloaded, underloaded, toTransfer);
-        }
-    }
-    
-    private void transferChunks(UUID from, UUID to, int count) {
-        // Trouver les chunks transférables (pas de joueurs à proximité)
-        List<ChunkPos> transferable = findTransferableChunks(from, count);
-        
-        // Envoyer message de transfert
-        ChunkTransferMessage msg = new ChunkTransferMessage();
-        msg.fromPeer = from;
-        msg.toPeer = to;
-        msg.chunks = transferable;
-        
-        P2PNetwork.send(msg, to);
-        P2PNetwork.send(msg, from);
-    }
-}
-```
-
----
-
-## 📡 Serveur central (Stockage uniquement)
-
-Le serveur central ne calcule RIEN, il sert uniquement de :
-
-**1. Dépôt de fichiers**
-```
-/worlds/
-  /survival-world/
-    /region/        ← Fichiers .mca (terrain)
-    /playerdata/    ← Inventaires, stats
-    /data/          ← Villages, structures
-    level.dat       ← Seed, règles
-```
-
-**2. Base de données**
-```sql
--- Authentification et métadonnées
-CREATE TABLE players (
-    uuid VARCHAR(36) PRIMARY KEY,
-    username VARCHAR(16),
-    last_position_x DOUBLE,
-    last_position_y DOUBLE,
-    last_position_z DOUBLE,
-    last_seen TIMESTAMP
-);
-
-CREATE TABLE servers (
-    server_id VARCHAR(36) PRIMARY KEY,
-    name VARCHAR(100),
-    created_at TIMESTAMP,
-    max_players INT
-);
-```
-
-**3. API REST simple**
-```javascript
-// Endpoints
-GET  /worlds/:worldId/region/:x/:z     // Télécharger un fichier région
-POST /worlds/:worldId/region/:x/:z     // Upload une région modifiée
-GET  /players/:uuid                     // Données joueur
-POST /players/:uuid                     // Sauvegarder données joueur
-GET  /servers/:serverId/peers          // Liste des peers connectés
-POST /servers/:serverId/join           // Rejoindre un serveur
-```
-
-**Implémentation légère (Node.js/Express) :**
-
-```javascript
-const express = require('express');
-const app = express();
-
-// Télécharger une région
-app.get('/worlds/:worldId/region/:x/:z', (req, res) => {
-    const { worldId, x, z } = req.params;
-    const regionFile = `./worlds/${worldId}/region/r.${x}.${z}.mca`;
-    
-    if (fs.existsSync(regionFile)) {
-        res.sendFile(regionFile);
-    } else {
-        res.status(404).send('Region not found');
-    }
-});
-
-// Upload d'une région (quand un peer sauvegarde)
-app.post('/worlds/:worldId/region/:x/:z', upload.single('region'), (req, res) => {
-    const { worldId, x, z } = req.params;
-    const regionFile = `./worlds/${worldId}/region/r.${x}.${z}.mca`;
-    
-    fs.writeFileSync(regionFile, req.file.buffer);
-    res.json({ success: true });
-});
-
-app.listen(3000);
-```
-
----
-
-## 🚀 Stack technologique
-
-### Launcher
-- **UI** : Electron + React + TypeScript
-- **Backend** : Node.js
-- **P2P Discovery** : WebRTC + Socket.io pour signaling
-
-### Agent Java
-- **Language** : Java 17+
-- **Bytecode Manipulation** : ASM 9.x
-- **Build** : Gradle
-
-### Réseau P2P
-- **WebRTC** : PeerJS ou simple-peer
-- **Fallback TCP** : Socket Java natif
-- **Sérialisation** : MessagePack ou Protocol Buffers
-
-### Serveur central
-- **Backend** : Node.js + Express ou Go
-- **Base de données** : PostgreSQL ou SQLite
-- **Stockage** : Système de fichiers local ou S3
-
----
-
-## 📊 Performance attendue
-
-### Scénarios
-
-**1 joueur seul :**
-```
-- Calcule tous les chunks autour de lui (radius 10)
-- ~100 chunks actifs
-- CPU : 60-80% d'un cœur
-```
-
-**2 joueurs éloignés :**
-```
-- Chacun calcule sa zone
-- ~100 chunks chacun
-- CPU : 50% chacun (total 100%, mais distribué)
-```
-
-**4 joueurs dispersés :**
-```
-- Chaque joueur : ~100 chunks
-- CPU : 25-30% par joueur
-- Total : 100-120% distribué sur 4 machines
-```
-
-**10 joueurs dans différentes zones :**
-```
-- Chaque joueur : ~40 chunks en moyenne
-- CPU : 10-15% par joueur
-- Scalabilité quasi-linéaire
-```
-
-### Limitations
-
-⚠️ **Zones partagées** : Si tous les joueurs sont au même endroit, le bénéfice P2P diminue  
-⚠️ **Latence réseau** : Sync d'entités nécessite ~50ms max entre peers  
-⚠️ **Bande passante** : ~1-2 Mbps par joueur pour la synchronisation  
-
----
-
-## 🗺️ Roadmap de développement
-
-### Phase 1 : Prototype (2-3 mois)
-- [ ] Launcher basique avec injection d'agent
-- [ ] Agent Java avec interception de ServerLevel.tick()
-- [ ] Système de chunks distribués (algorithme de base)
-- [ ] Communication P2P simple (TCP/IP)
-- [ ] Test avec 2 clients
-
-### Phase 2 : Synchronisation (2-3 mois)
-- [ ] Système d'entités "ghost"
-- [ ] Broadcast des entités entre peers
-- [ ] Gestion des changements de blocs
-- [ ] Protocole de messages optimisé
-- [ ] Test avec 4-5 clients
-
-### Phase 3 : Optimisation (2 mois)
-- [ ] Load balancer automatique
-- [ ] WebRTC pour réduire latence
-- [ ] Compression des messages
-- [ ] Détection de déconnexion et migration
-- [ ] Test avec 10+ clients
-
-### Phase 4 : Production (2 mois)
-- [ ] Interface utilisateur complète
-- [ ] Serveur central robuste
-- [ ] Système de mods/plugins compatible
-- [ ] Documentation complète
-- [ ] Tests de stress
-
-### Phase 5 : Fonctionnalités avancées
-- [ ] Support multi-mondes (Nether, End)
-- [ ] Sauvegarde distribuée
-- [ ] Anti-cheat basique
-- [ ] Système de backup automatique
-- [ ] Métriques de performance en temps réel
-
----
-
-## 🔧 Structure du projet
+## Structure du projet
 
 ```
-P2P-Server/
-├── server-agent/                      # Agent Java
-│   ├── src/main/java/
-│   │   ├── agent/
-│   │   │   ├── DistributedMinecraftAgent.java
-│   │   │   ├── transformers/
-│   │   │   │   ├── ServerLevelTransformer.java
-│   │   │   │   ├── ChunkTickTransformer.java
-│   │   │   │   └── EntityTickTransformer.java
-│   │   │   └── injection/
-│   │   │       └── ASMUtils.java
-│   │   ├── distributed/
-│   │   │   ├── DistributedChunkManager.java
-│   │   │   ├── EntitySyncSystem.java
-│   │   │   ├── LoadBalancer.java
-│   │   │   └── ChunkOwnership.java
-│   │   ├── network/
-│   │   │   ├── P2PNetwork.java
-│   │   │   ├── PeerConnection.java
-│   │   │   ├── MessageProtocol.java
-│   │   │   └── SignalingClient.java
-│   │   └── storage/
-│   │       ├── WorldStorageClient.java
-│   │       └── RegionFileSync.java
-│   └── build.gradle
+yuyuframe/
+├── agent/                     ← Java Agent + Mixin standalone
+│   ├── bootstrap/             ← premain, détection version, init Mixin
+│   ├── mixins/                ← hooks sur serveur intégré et ClientWorld
+│   └── jni/                   ← pont vers le cœur Rust
 │
-├── server/                     # Serveur central (stockage)
-│   ├── src/
-│   │   ├── api/               # API REST
-│   │   ├── storage/           # Gestion fichiers
-│   │   ├── database/          # PostgreSQL
-│   │   └── signaling/         # Serveur de signaling P2P
-│   └── package.json
+├── rust-core/                 ← Cœur Rust (bibliothèque native)
+│   ├── ownership/             ← Ownership engine + physic-aware
+│   ├── delta/                 ← Capture, sérialisation, diffusion
+│   ├── network/               ← libp2p, streams, file d'attente
+│   └── jni/                   ← Interface JNI exposée à Java
 │
-├── protocol/                   # Définitions protocole
-│   ├── messages.proto         # Protocol Buffers
-│   └── README.md
+├── relay/                     ← Relay server (signaling uniquement)
+│   └── src/                   ← Serveur léger, quelques centaines de lignes
 │
-├── docs/                       # Documentation
-│   ├── architecture.md
-│   ├── protocol.md
-│   ├── deployment.md
-│   └── contributing.md
+├── docs/
+│   ├── README_couche1_connectivite_p2p.md
+│   ├── README_couche2_ownership_engine.md
+│   ├── README_couche3_v2_simulation_et_delta.md
+│   ├── README_couche4_border_sync.md
+│   └── README_aot_precompilation.md
 │
-└── README.md                   # Ce fichier
+└── README.md                  ← Ce fichier
 ```
 
 ---
 
-## 🛠️ Installation et développement
+## Roadmap
 
-### Prérequis
-- Java 17+
-- Node.js 18+
-- Gradle 7+
-- Minecraft 1.20.x (compatible)
+### Phase 1 — Connectivité P2P (couche 1)
+Établir des connexions libp2p fiables entre deux pairs sur internet, avec NAT traversal et relay de secours. Vérification : deux instances Minecraft se connectent et maintiennent un tunnel stable.
 
-### Build de l'agent
+### Phase 2 — Ownership engine (couche 2)
+Implémenter l'attribution déterministe des quadrants par distance minimale. Vérification : deux instances calculent la même table d'ownership à partir des mêmes positions, sans communication.
 
-```bash
-cd agent
-gradle shadowJar
-# Génère : agent/build/libs/distributed-agent.jar
-```
+### Phase 3 — Simulation et deltas (couche 3)
+Instrumenter le serveur intégré pour la simulation sélective, capturer les deltas en fin de tick, les diffuser, les recevoir et les injecter dans `ClientWorld`. Vérification : un bloc posé sur une instance apparaît sur l'autre.
 
-### Build du launcher
+### Phase 4 — Border sync (couche 4)
+Implémenter l'ownership physic-aware pour les fluides et la redstone, et le ghost layer pour les entités aux frontières. Vérification : l'eau coule naturellement à travers les frontières de quadrants.
 
-```bash
-cd launcher
-npm install
-npm run build
-# Génère : launcher/dist/
-```
-
-### Lancer en développement
-
-```bash
-# Terminal 1 : Serveur central
-cd server
-npm install
-npm run dev
-
-# Terminal 2 : Launcher (client 1)
-cd launcher
-npm run dev
-
-# Terminal 3 : Launcher (client 2)
-cd launcher
-npm run dev
-```
+### Phase 5 — Stabilisation et optimisation
+Tests multi-instances prolongés, détection et gestion des cas limites, implémentation optionnelle de la précompilation AOT pour les releases.
 
 ---
 
-## 📝 Configuration
+## Documentation détaillée
 
-### Fichier de configuration launcher
+Chaque couche est documentée en détail dans un fichier dédié :
 
-```json
-{
-  "launcher": {
-    "minecraftVersion": "1.20.4",
-    "javaPath": "/usr/bin/java",
-    "jvmArgs": ["-Xmx4G", "-Xms2G"]
-  },
-  "p2p": {
-    "signalingServer": "wss://signal.myserver.com",
-    "useWebRTC": true,
-    "maxPeers": 20,
-    "port": 25565
-  },
-  "world": {
-    "storageServer": "https://storage.myserver.com",
-    "autoSync": true,
-    "syncInterval": 300
-  }
-}
-```
+- **Couche 1** — Connectivité P2P, libp2p, signaling, NAT traversal
+- **Couche 2** — Ownership engine, quadrants, règle déterministe, handoff
+- **Couche 3** — Java Agent, Mixin standalone, cœur Rust, tick loop, deltas, ClientWorld
+- **Couche 4** — Border sync, ownership physic-aware, ghost layer, transfer d'entités
+- **AOT** — Précompilation optionnelle pour optimiser le démarrage
 
 ---
 
-## 🤝 Contribution
-
-Ce projet est en développement actif. Les contributions sont bienvenues !
-
-### Domaines qui nécessitent de l'aide :
-- Optimisation réseau (réduction de latence)
-- Gestion de la déconnexion/reconnexion
-- Interface utilisateur du launcher
-- Tests de charge et benchmarks
-- Documentation
-
----
-
-## ⚖️ Licence
-
-À définir (MIT suggérée)
-
----
-
-## 📞 Contact
-
-- GitHub Issues pour les bugs
-- Discussions pour les questions générales
-- Discord : [Lien à créer]
-
----
-
-## 🎯 Objectifs à long terme
-
-1. **Scalabilité** : Supporter 50+ joueurs simultanés
-2. **Stabilité** : 99%+ uptime avec récupération automatique
-3. **Performance** : <50ms de latence pour sync entités
-4. **Compatibilité** : Support des mods populaires (Forge, Fabric)
-5. **Économie** : Réduire les coûts d'hébergement de 70-90%
-
----
-
-**Version** : 0.1.0-alpha  
-**Dernière mise à jour** : Mai 2026
+*YuyuFrame — Architecture P2P Minecraft basée sur la confiance mutuelle.*  
+*Version : 0.1.0-alpha*
