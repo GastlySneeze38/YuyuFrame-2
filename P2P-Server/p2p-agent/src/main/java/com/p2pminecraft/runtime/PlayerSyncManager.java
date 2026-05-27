@@ -1,6 +1,5 @@
 package com.p2pminecraft.runtime;
 
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,7 +23,7 @@ public class PlayerSyncManager {
 
     /** Appelé depuis Entity.tick() pour chaque entité — filtre sur ServerPlayer. */
     public static void onEntityTick(Object entity) {
-        if (!entity.getClass().getName().contains("ServerPlayer")) return;
+        if (!MappingsRegistry.isInstance(entity, "net/minecraft/server/level/ServerPlayer")) return;
 
         long now = System.currentTimeMillis();
         if (now - lastBroadcast < 500) return;
@@ -34,13 +33,20 @@ public class PlayerSyncManager {
         if (net == null) return;
 
         try {
-            double x     = (double) entity.getClass().getMethod("getX").invoke(entity);
-            double y     = (double) entity.getClass().getMethod("getY").invoke(entity);
-            double z     = (double) entity.getClass().getMethod("getZ").invoke(entity);
-            float  yaw   = (float)  entity.getClass().getMethod("getYRot").invoke(entity);
-            float  pitch = (float)  entity.getClass().getMethod("getXRot").invoke(entity);
+            String entityClass = "net/minecraft/world/entity/Entity";
+            String getXName   = MappingsRegistry.getObfMethodName(entityClass, "getX");
+            String getYName   = MappingsRegistry.getObfMethodName(entityClass, "getY");
+            String getZName   = MappingsRegistry.getObfMethodName(entityClass, "getZ");
+            String getYRotName = MappingsRegistry.getObfMethodName(entityClass, "getYRot");
+            String getXRotName = MappingsRegistry.getObfMethodName(entityClass, "getXRot");
 
-            ByteBuffer buf = ByteBuffer.allocate(1 + 8 + 8 + 8 + 4 + 4); // 33 bytes
+            double x     = (double) entity.getClass().getMethod(getXName).invoke(entity);
+            double y     = (double) entity.getClass().getMethod(getYName).invoke(entity);
+            double z     = (double) entity.getClass().getMethod(getZName).invoke(entity);
+            float  yaw   = (float)  entity.getClass().getMethod(getYRotName).invoke(entity);
+            float  pitch = (float)  entity.getClass().getMethod(getXRotName).invoke(entity);
+
+            ByteBuffer buf = ByteBuffer.allocate(1 + 8 + 8 + 8 + 4 + 4);
             buf.put(TYPE_PLAYER);
             buf.putDouble(x);
             buf.putDouble(y);

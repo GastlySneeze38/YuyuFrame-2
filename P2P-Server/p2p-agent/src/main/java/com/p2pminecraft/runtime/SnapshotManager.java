@@ -238,8 +238,10 @@ public class SnapshotManager {
     // ── Réflexion ─────────────────────────────────────────────────────────────
 
     private static Object getChunkFromLevel(Object level, int cx, int cz) throws Exception {
+        String getChunkName = MappingsRegistry.getObfMethodName(
+            "net/minecraft/world/level/Level", "getChunk");
         for (Method m : level.getClass().getMethods()) {
-            if (!m.getName().equals("getChunk") || m.getParameterCount() != 2) continue;
+            if (!m.getName().equals(getChunkName) || m.getParameterCount() != 2) continue;
             Class<?>[] p = m.getParameterTypes();
             if (p[0] == int.class && p[1] == int.class) return m.invoke(level, cx, cz);
         }
@@ -247,8 +249,10 @@ public class SnapshotManager {
     }
 
     private static Object[] getSections(Object chunk) throws Exception {
+        String getSectionsName = MappingsRegistry.getObfMethodName(
+            "net/minecraft/world/level/chunk/LevelChunk", "getSections");
         for (Method m : chunk.getClass().getMethods()) {
-            if (m.getName().equals("getSections") && m.getParameterCount() == 0) {
+            if (m.getName().equals(getSectionsName) && m.getParameterCount() == 0) {
                 Object r = m.invoke(chunk);
                 if (r instanceof Object[]) return (Object[]) r;
             }
@@ -258,27 +262,35 @@ public class SnapshotManager {
 
     private static int getMinBuildHeight(Object level) {
         try {
-            return (int) level.getClass().getMethod("getMinBuildHeight").invoke(level);
+            String methodName = MappingsRegistry.getObfMethodName(
+                "net/minecraft/world/level/LevelHeightAccessor", "getMinBuildHeight");
+            return (int) level.getClass().getMethod(methodName).invoke(level);
         } catch (Exception e) { return -64; }
     }
 
     private static boolean isSectionEmpty(Object sec) {
         try {
-            return (boolean) sec.getClass().getMethod("hasOnlyAir").invoke(sec);
+            String methodName = MappingsRegistry.getObfMethodName(
+                "net/minecraft/world/level/chunk/LevelChunkSection", "hasOnlyAir");
+            return (boolean) sec.getClass().getMethod(methodName).invoke(sec);
         } catch (Exception e) { return false; }
     }
 
     private static Object getSectionBlockState(Object sec, int x, int y, int z) {
         try {
+            String methodName = MappingsRegistry.getObfMethodName(
+                "net/minecraft/world/level/chunk/LevelChunkSection", "getBlockState");
             return sec.getClass()
-                .getMethod("getBlockState", int.class, int.class, int.class)
+                .getMethod(methodName, int.class, int.class, int.class)
                 .invoke(sec, x, y, z);
         } catch (Exception e) { return null; }
     }
 
     private static boolean isAir(Object bs) {
         try {
-            return (boolean) bs.getClass().getMethod("isAir").invoke(bs);
+            String methodName = MappingsRegistry.getObfMethodName(
+                "net/minecraft/world/level/block/state/BlockBehaviour$BlockStateBase", "isAir");
+            return (boolean) bs.getClass().getMethod(methodName).invoke(bs);
         } catch (Exception e) {
             String id = BlockSyncManager.getBlockId(bs);
             return "minecraft:air".equals(id) || "minecraft:void_air".equals(id)

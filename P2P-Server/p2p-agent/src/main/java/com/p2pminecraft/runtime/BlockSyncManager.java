@@ -16,28 +16,24 @@ public class BlockSyncManager {
 
     public static final byte TYPE_BLOCK = 0x01;
 
-    /** Empêche de re-broadcaster les changements reçus du réseau. */
     static final ThreadLocal<Boolean> RECEIVING = ThreadLocal.withInitial(() -> false);
-
-    /** Référence au ServerLevel courant, mise à jour depuis ChunkTransformer.tick(). */
     static final AtomicReference<Object> levelRef = new AtomicReference<>();
-
-    /** File thread-safe : blocs reçus, à appliquer sur le thread serveur. */
     static final ConcurrentLinkedQueue<byte[]> pending = new ConcurrentLinkedQueue<>();
 
-    // ── Enregistrement du niveau (appelé par ChunkTransformer) ────────────────
+    // ── Enregistrement du niveau ───────────────────────────────────────────────
 
     public static void registerLevel(Object level) {
-        if (level != null && level.getClass().getName().contains("ServerLevel")) {
+        if (level == null) return;
+        if (MappingsRegistry.isInstance(level, "net/minecraft/server/level/ServerLevel")) {
             levelRef.set(level);
         }
     }
 
-    // ── Outbound : un bloc a changé localement ────────────────────────────────
+    // ── Outbound ───────────────────────────────────────────────────────────────
 
     public static void notifyBlockChanged(int x, int y, int z, Object newState, Object level) {
         if (RECEIVING.get() || newState == null || level == null) return;
-        if (!level.getClass().getName().contains("ServerLevel")) return;
+        if (!MappingsRegistry.isInstance(level, "net/minecraft/server/level/ServerLevel")) return;
 
         P2PNetwork net = RuntimeInitializer.getNetwork();
         if (net == null) return;
@@ -53,17 +49,15 @@ public class BlockSyncManager {
         buf.putInt(z);
         buf.putShort((short) idBytes.length);
         buf.put(idBytes);
-
         net.broadcastData(buf.array());
     }
 
-    // ── Inbound : données reçues depuis le thread WebSocket ───────────────────
+    // ── Inbound ────────────────────────────────────────────────────────────────
 
     public static void handleReceived(byte[] data) {
         pending.offer(data);
     }
 
-    /** Appelé depuis afterChunkTick (thread serveur) — applique les blocs en attente. */
     public static void flushPendingChanges() {
         byte[] data;
         int limit = 64;
@@ -75,10 +69,8 @@ public class BlockSyncManager {
     private static void applyBlockChange(byte[] data) {
         if (data.length < 13) return;
         ByteBuffer buf = ByteBuffer.wrap(data);
-        buf.get(); // type
-        int x = buf.getInt();
-        int y = buf.getInt();
-        int z = buf.getInt();
+        buf.get();
+        int x = buf.getInt(), y = buf.getInt(), z = buf.getInt();
         if (buf.remaining() < 2) return;
         short idLen = buf.getShort();
         if (idLen < 1 || buf.remaining() < idLen) return;
@@ -88,12 +80,10 @@ public class BlockSyncManager {
 
         Object level = levelRef.get();
         if (level == null) return;
-
         try {
             Object pos   = createBlockPos(x, y, z);
             Object state = lookupBlockState(blockId);
             if (pos == null || state == null) return;
-
             RECEIVING.set(true);
             try {
                 callSetBlock(level, pos, state, 3);
@@ -106,23 +96,23 @@ public class BlockSyncManager {
         }
     }
 
-    // ── Helpers de réflexion ──────────────────────────────────────────────────
+    // ── Helpers de réflexion ───────────────────────────────────────────────────
 
-    /** Extrait l'ID du bloc depuis le toString() de Block : "Block{minecraft:stone}" → "minecraft:stone" */
+    /** "Block{minecraft:stone}" → "minecraft:stone" */
     static String getBlockId(Object blockState) {
         try {
-            Method getBlock = blockState.getClass().getMethod("getBlock");
+            String getBlockName = MappingsRegistry.getObfMethodName(
+                "net/minecraft/world/level/block/state/BlockBehaviour$BlockStateBase", "getBlock");
+            Method getBlock = blockState.getClass().getMethod(getBlockName);
             Object block = getBlock.invoke(blockState);
             String s = block.toString();
-            if (s.startsWith("Block{") && s.endsWith("}")) {
-                return s.substring(6, s.length() - 1);
-            }
+            if (s.startsWith("Block{") && s.endsWith("}")) return s.substring(6, s.length() - 1);
         } catch (Exception ignored) {}
         return null;
     }
 
     static Object createBlockPos(int x, int y, int z) throws Exception {
-        Class<?> cls = Class.forName("net.minecraft.core.BlockPos");
+        Class<?> cls = MappingsRegistry.loadClass("net/minecraft/core/BlockPos");
         return cls.getConstructor(int.class, int.class, int.class).newInstance(x, y, z);
     }
 
@@ -130,14 +120,18 @@ public class BlockSyncManager {
 
     static Object blockRegistry() throws Exception {
         if (cachedBlockRegistry != null) return cachedBlockRegistry;
-        Class<?> c = Class.forName("net.minecraft.core.registries.BuiltInRegistries");
-        return cachedBlockRegistry = c.getField("BLOCK").get(null);
+        Class<?> c = MappingsRegistry.loadClass("net/minecraft/core/registries/BuiltInRegistries");
+        String blockFieldName = MappingsRegistry.getObfFieldName(
+            "net/minecraft/core/registries/BuiltInRegistries", "BLOCK");
+        return cachedBlockRegistry = c.getField(blockFieldName).get(null);
     }
 
     static Object parseResourceLocation(String id) throws Exception {
-        Class<?> cls = Class.forName("net.minecraft.resources.ResourceLocation");
+        Class<?> cls = MappingsRegistry.loadClass("net/minecraft/resources/ResourceLocation");
+        String parseMethod = MappingsRegistry.getObfMethodName(
+            "net/minecraft/resources/ResourceLocation", "parse");
         try {
-            return cls.getMethod("parse", String.class).invoke(null, id);
+            return cls.getMethod(parseMethod, String.class).invoke(null, id);
         } catch (NoSuchMethodException e) {
             return cls.getConstructor(String.class).newInstance(id);
         }
@@ -147,24 +141,31 @@ public class BlockSyncManager {
         Object registry = blockRegistry();
         Object rl = parseResourceLocation(blockId);
 
+        String getMethodName = MappingsRegistry.getObfMethodName(
+            "net/minecraft/core/Registry", "get");
+        String defaultBlockStateName = MappingsRegistry.getObfMethodName(
+            "net/minecraft/world/level/block/Block", "defaultBlockState");
+
         for (Method m : registry.getClass().getMethods()) {
-            if (!m.getName().equals("get") || m.getParameterCount() != 1) continue;
-            if (!m.getParameterTypes()[0].isAssignableFrom(rl.getClass())) continue;
+            if (!m.getName().equals(getMethodName) || m.getParameterCount() != 1) continue;
+            if (!m.getParameterTypes()[0].isInstance(rl)) continue;
             try {
                 Object block = m.invoke(registry, rl);
                 if (block == null) continue;
-                return block.getClass().getMethod("defaultBlockState").invoke(block);
+                return block.getClass().getMethod(defaultBlockStateName).invoke(block);
             } catch (Exception ignored) {}
         }
         return null;
     }
 
     static void callSetBlock(Object level, Object pos, Object state, int flags) throws Exception {
+        String setBlockName = MappingsRegistry.getObfMethodName(
+            "net/minecraft/world/level/LevelWriter", "setBlock");
         for (Method m : level.getClass().getMethods()) {
-            if (!m.getName().equals("setBlock") || m.getParameterCount() != 3) continue;
+            if (!m.getName().equals(setBlockName) || m.getParameterCount() != 3) continue;
             Class<?>[] params = m.getParameterTypes();
             if (!params[2].equals(int.class)) continue;
-            if (!params[0].getName().contains("BlockPos")) continue;
+            if (!params[0].isInstance(pos)) continue;
             m.invoke(level, pos, state, flags);
             return;
         }

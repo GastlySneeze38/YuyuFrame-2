@@ -1,5 +1,6 @@
 package com.p2pminecraft.agent;
 
+import com.p2pminecraft.runtime.MappingsRegistry;
 import com.p2pminecraft.runtime.RuntimeInitializer;
 import org.spongepowered.asm.launch.MixinBootstrap;
 import org.spongepowered.asm.mixin.MixinEnvironment;
@@ -12,7 +13,11 @@ import java.lang.instrument.Instrumentation;
  *
  * Ordre des javaagents dans la JVM :
  *   1. -javaagent:mixin.jar          → MixinAgent.premain() capture l'Instrumentation
- *   2. -javaagent:p2p-agent.jar=...  → ce premain active Mixin + réseau P2P
+ *   2. -javaagent:p2p-agent.jar=...  → ce premain charge les mappings, active Mixin + réseau P2P
+ *
+ * Le paramètre optionnel mappings= pointe vers le fichier ProGuard Mojang.
+ * Quand présent, MappingsRegistry est initialisé et ajouté à la chaîne de remapping Mixin
+ * pour que LevelChunkMixin cible correctement le JAR Minecraft obfusqué non mappé.
  */
 public class P2PAgent {
 
@@ -22,11 +27,29 @@ public class P2PAgent {
         AgentConfig config = AgentConfig.parse(agentArgs);
         System.out.println("[P2P Agent] peerId=" + config.peerId + " name=" + config.peerName);
 
+        // Chargement des mappings Mojang (si fournis)
+        if (config.mappingsPath != null && !config.mappingsPath.isEmpty()) {
+            try {
+                MappingsRegistry.load(config.mappingsPath);
+            } catch (Exception e) {
+                System.err.println("[P2P Agent] Mappings non chargés (" + config.mappingsPath + ") : " + e.getMessage());
+            }
+        } else {
+            System.out.println("[P2P Agent] Aucun mappings fourni — mode JAR mappé (noms Mojang directs)");
+        }
+
         // Active Mixin : MixinAgent (mixin.jar) a déjà capturé l'Instrumentation.
-        // MixinBootstrap découvre notre P2PMixinService via ServiceLoader.
+        // Le remappeur MappingsRegistry est enregistré AVANT addConfiguration pour que
+        // la résolution des classes cibles (@Mixin) utilise les noms obfusqués corrects.
         try {
             MixinBootstrap.init();
             MixinEnvironment.getDefaultEnvironment().setSide(MixinEnvironment.Side.CLIENT);
+
+            if (MappingsRegistry.isLoaded()) {
+                MixinEnvironment.getDefaultEnvironment().getRemappers().add(MappingsRegistry.INSTANCE);
+                System.out.println("[P2P Agent] Remappeur Mojang → obfusqué enregistré dans Mixin");
+            }
+
             Mixins.addConfiguration("mixins.p2p.json");
             System.out.println("[P2P Agent] Mixin initialisé — LevelChunkMixin enregistré");
         } catch (Exception e) {

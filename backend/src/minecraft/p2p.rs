@@ -16,7 +16,7 @@ pub const SIGNALING_PORT: u16 = 8765;
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
 /// Dossier P2P dans AppData/YuyuFrame/p2p/
-/// Doit contenir : p2p-agent.jar, remapper.jar, rust_core.dll
+/// Doit contenir : p2p-agent.jar, mixin.jar, rust_core.dll
 pub fn p2p_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -183,70 +183,29 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
     }
 }
 
-// ── Mapped JAR ────────────────────────────────────────────────────────────────
+// ── Mappings Mojang ───────────────────────────────────────────────────────────
 
-/// Retourne le chemin vers `client-<ver>-mapped.jar`, le créant si besoin.
-/// `java` : exécutable Java déjà résolu par ensure_java().
-pub async fn ensure_mapped_jar(
+/// Télécharge (si absent) et retourne le chemin vers `client-mappings-<ver>.txt`.
+/// Remplace l'ancien `ensure_mapped_jar` — plus besoin de remapper.jar.
+pub async fn ensure_mappings(
     version: &str,
-    client_jar: &Path,
     client: &reqwest::Client,
     app: &tauri::AppHandle,
-    java: &str,
 ) -> Result<PathBuf> {
     let cache_dir = p2p_dir().join("cache");
     tokio::fs::create_dir_all(&cache_dir).await?;
 
-    let mapped_jar = cache_dir.join(format!("client-{}-mapped.jar", version));
-    if mapped_jar.exists() {
+    let mappings = cache_dir.join(format!("client-mappings-{}.txt", version));
+    if mappings.exists() {
         let _ = app.emit("game_log", serde_json::json!({
-            "line": format!("[P2P] JAR mappé en cache : {}", mapped_jar.display()),
+            "line": format!("[P2P] Mappings en cache : {}", mappings.display()),
             "level": "out"
         }));
-        return Ok(mapped_jar);
+        return Ok(mappings);
     }
 
-    // Mappings
-    let mappings = cache_dir.join(format!("client-mappings-{}.txt", version));
-    if !mappings.exists() {
-        download_mappings(version, &mappings, client, app).await?;
-    }
-
-    // Vérifier remapper.jar
-    let remapper_jar = p2p_dir().join("remapper.jar");
-    if !remapper_jar.exists() {
-        return Err(anyhow!(
-            "remapper.jar manquant dans {}\n  Copier P2P-Test/remapper/build/remapper.jar vers ce dossier",
-            p2p_dir().display()
-        ));
-    }
-
-    // Lancer le remapping
-    tracing::info!("[P2P] Remapping {} en cours...", version);
-    let _ = app.emit("download_progress", serde_json::json!({
-        "current": 0, "total": 100,
-        "message": format!("P2P : remapping Minecraft {} (1-3 min)...", version)
-    }));
-
-    let status = tokio::process::Command::new(java)
-        .args(["-Xmx512m", "-jar"])
-        .arg(&remapper_jar)
-        .arg(client_jar)
-        .arg(&mappings)
-        .arg(&mapped_jar)
-        .status()
-        .await
-        .map_err(|e| anyhow!("java introuvable pour le remapping : {}", e))?;
-
-    if !status.success() {
-        return Err(anyhow!("Remapping du JAR Minecraft échoué — voir les logs"));
-    }
-
-    let _ = app.emit("game_log", serde_json::json!({
-        "line": format!("[P2P] JAR mappé → {}", mapped_jar.display()),
-        "level": "out"
-    }));
-    Ok(mapped_jar)
+    download_mappings(version, &mappings, client, app).await?;
+    Ok(mappings)
 }
 
 async fn download_mappings(

@@ -266,8 +266,9 @@ pub async fn download_and_launch(
         };
 
     // ── P2P setup ────────────────────────────────────────────────────────────
-    // Démarre le signaling, prépare le JAR mappé et l'arg -javaagent si p2p=true.
-    // Fait avant d'attendre les assets pour paralléliser le remapping (>1 min) avec leur DL.
+    // Démarre le signaling, télécharge les mappings Mojang et prépare les javaagents.
+    // Le JAR original Minecraft est utilisé directement — le remapping est assuré à
+    // l'exécution par MappingsRegistry (IRemapper Mixin) et les appels de réflexion.
     let (effective_client_jar, p2p_jvm_args) = if p2p {
         p2p::start_signaling(app.clone());
 
@@ -280,10 +281,11 @@ pub async fn download_and_launch(
             tracing::warn!("[P2P] {} manquant dans {} — JNI désactivé", dll_name, p2p::p2p_dir().display());
         }
 
-        let mapped = p2p::ensure_mapped_jar(version_id, &client_jar, &client, &app, &java).await?;
+        // Télécharger les mappings Mojang (quelques Ko, rapide)
+        let mappings_path = p2p::ensure_mappings(version_id, &client, &app).await?;
 
-        let mixin_jar  = p2p::p2p_dir().join("mixin.jar");
-        let agent_jar  = p2p::p2p_dir().join("p2p-agent.jar");
+        let mixin_jar = p2p::p2p_dir().join("mixin.jar");
+        let agent_jar = p2p::p2p_dir().join("p2p-agent.jar");
 
         if !mixin_jar.exists() {
             return Err(anyhow!(
@@ -298,18 +300,21 @@ pub async fn download_and_launch(
             ));
         }
 
-        let peer_id    = uuid::Uuid::new_v4().to_string();
+        let peer_id = uuid::Uuid::new_v4().to_string();
         // mixin.jar DOIT être listé AVANT p2p-agent.jar : MixinAgent.premain() capture
         // l'Instrumentation que MixinBootstrap.init() utilisera ensuite.
-        let mixin_arg  = format!("-javaagent:{}", mixin_jar.display());
-        let agent_arg  = format!(
-            "-javaagent:{}=peerId={},name={},server=ws://127.0.0.1:{}",
+        let mixin_arg = format!("-javaagent:{}", mixin_jar.display());
+        let agent_arg = format!(
+            "-javaagent:{}=peerId={},name={},server=ws://127.0.0.1:{},mappings={}",
             agent_jar.display(), peer_id, session.username, p2p::SIGNALING_PORT,
+            mappings_path.display(),
         );
 
-        log_to_console(&app, &console_label, &format!("[P2P] Mixin  : {}", mixin_arg), "out");
-        log_to_console(&app, &console_label, &format!("[P2P] Agent  : {}", agent_arg), "out");
-        (mapped, vec![mixin_arg, agent_arg])
+        log_to_console(&app, &console_label, &format!("[P2P] Mixin    : {}", mixin_arg), "out");
+        log_to_console(&app, &console_label, &format!("[P2P] Agent    : {}", agent_arg), "out");
+        log_to_console(&app, &console_label, &format!("[P2P] Mappings : {}", mappings_path.display()), "out");
+        // JAR original (obfusqué) — le remapping est géré à l'exécution par MappingsRegistry
+        (client_jar.clone(), vec![mixin_arg, agent_arg])
     } else {
         (client_jar.clone(), vec![])
     };

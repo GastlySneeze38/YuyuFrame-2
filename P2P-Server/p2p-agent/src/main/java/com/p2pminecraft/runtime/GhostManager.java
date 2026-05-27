@@ -15,13 +15,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class GhostManager {
 
-    /** peerId → nom du ghost (ex: "P2P_abcd1234") */
     private static final Map<String, String> peerGhosts = new ConcurrentHashMap<>();
-
-    /** Noms des ghosts déjà spawnés dans le monde. */
     private static final Set<String> spawned = ConcurrentHashMap.newKeySet();
-
-    /** Commandes en attente d'exécution sur le thread serveur. */
     private static final ConcurrentLinkedQueue<String> pendingCmds = new ConcurrentLinkedQueue<>();
 
     // ── API publique ──────────────────────────────────────────────────────────
@@ -33,7 +28,6 @@ public class GhostManager {
             id -> "P2P_" + id.substring(0, Math.min(8, id.length())));
 
         if (spawned.add(name)) {
-            // Première apparition : spawner le zombie
             String nbt = String.format(
                 "{CustomName:'{\"text\":\"%s\"}',NoAI:1b,Silent:1b,Invulnerable:1b,PersistenceRequired:1b}",
                 name);
@@ -41,7 +35,6 @@ public class GhostManager {
                 "summon minecraft:zombie %.3f %.3f %.3f %s", x, y, z, nbt));
             System.out.println("[P2P] Ghost spawné : " + name);
         } else {
-            // Mises à jour suivantes : téléporter
             pendingCmds.offer(String.format(
                 "tp @e[name=%s,type=minecraft:zombie,limit=1] %.3f %.3f %.3f %.1f %.1f",
                 name, x, y, z, (double) yaw, (double) pitch));
@@ -56,7 +49,6 @@ public class GhostManager {
         }
     }
 
-    /** Appelé depuis afterChunkTick (thread serveur) — exécute jusqu'à 16 commandes. */
     public static void flush() {
         String cmd;
         int limit = 16;
@@ -69,21 +61,28 @@ public class GhostManager {
 
     private static boolean executeServerCommand(String cmd) {
         try {
-            // Minecraft.getInstance().getSingleplayerServer()
-            Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft");
-            Object mc = mcCls.getMethod("getInstance").invoke(null);
-            Object server = mcCls.getMethod("getSingleplayerServer").invoke(mc);
+            String mcClass = "net/minecraft/client/Minecraft";
+            Class<?> mcCls = MappingsRegistry.loadClass(mcClass);
+
+            String getInstanceName = MappingsRegistry.getObfMethodName(mcClass, "getInstance");
+            Object mc = mcCls.getMethod(getInstanceName).invoke(null);
+
+            String getSspName = MappingsRegistry.getObfMethodName(mcClass, "getSingleplayerServer");
+            Object server = mcCls.getMethod(getSspName).invoke(mc);
             if (server == null) return false;
 
-            Object source   = server.getClass().getMethod("createCommandSourceStack").invoke(server);
-            Object commands = server.getClass().getMethod("getCommands").invoke(server);
+            String serverClass = "net/minecraft/server/MinecraftServer";
+            String sourceName   = MappingsRegistry.getObfMethodName(serverClass, "createCommandSourceStack");
+            String commandsName = MappingsRegistry.getObfMethodName(serverClass, "getCommands");
 
-            // Commands.performPrefixedCommand(CommandSourceStack, String)
+            Object source   = server.getClass().getMethod(sourceName).invoke(server);
+            Object commands = server.getClass().getMethod(commandsName).invoke(server);
+
             for (Method m : commands.getClass().getMethods()) {
                 if (m.getParameterCount() != 2) continue;
                 if (!m.getParameterTypes()[1].equals(String.class)) continue;
                 String n = m.getName();
-                if (n.contains("prefixed") || (n.contains("perform") && n.contains("Command"))) {
+                if (n.contains("prefixed") || (n.contains("perform") && n.contains("ommand"))) {
                     m.invoke(commands, source, cmd);
                     return true;
                 }
