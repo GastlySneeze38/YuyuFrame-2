@@ -1,73 +1,46 @@
 package com.p2pminecraft.agent;
 
 import com.p2pminecraft.runtime.RuntimeInitializer;
-import com.p2pminecraft.transformer.*;
+import org.spongepowered.asm.launch.MixinBootstrap;
+import org.spongepowered.asm.mixin.MixinEnvironment;
+import org.spongepowered.asm.mixin.Mixins;
 
-import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
-import java.security.ProtectionDomain;
 
 /**
- * Point d'entrée du Java Agent.
- * Ajouté aux args JVM par YuyuFrame : -javaagent:p2p-agent.jar=peerId=xxx,name=Alice,server=ws://...
+ * Java agent P2P — utilise Mixin standalone pour les hooks bytecode.
+ *
+ * Ordre des javaagents dans la JVM :
+ *   1. -javaagent:mixin.jar          → MixinAgent.premain() capture l'Instrumentation
+ *   2. -javaagent:p2p-agent.jar=...  → ce premain active Mixin + réseau P2P
  */
 public class P2PAgent {
 
     public static void premain(String agentArgs, Instrumentation inst) {
-        System.out.println("[P2P Agent] Démarrage...");
+        System.out.println("[P2P Agent] Démarrage (mode Mixin)...");
 
         AgentConfig config = AgentConfig.parse(agentArgs);
         System.out.println("[P2P Agent] peerId=" + config.peerId + " name=" + config.peerName);
 
-        // Démarre le réseau P2P dans un thread daemon — n'interfère pas avec le chargement Minecraft.
-        // startGame() n'existe plus en MC 1.21+ ; on initialise ici plutôt que via bytecode injection.
+        // Active Mixin : MixinAgent (mixin.jar) a déjà capturé l'Instrumentation.
+        // MixinBootstrap découvre notre P2PMixinService via ServiceLoader.
+        try {
+            MixinBootstrap.init();
+            MixinEnvironment.getDefaultEnvironment().setSide(MixinEnvironment.Side.CLIENT);
+            Mixins.addConfiguration("mixins.p2p.json");
+            System.out.println("[P2P Agent] Mixin initialisé — LevelChunkMixin enregistré");
+        } catch (Exception e) {
+            System.err.println("[P2P Agent] ERREUR Mixin bootstrap : " + e.getMessage());
+            e.printStackTrace(System.err);
+        }
+
+        // Démarre le réseau P2P (P2PNetwork, WebSocket signaling)
         RuntimeInitializer.onGameStart();
 
-        inst.addTransformer(new UnifiedTransformer(), false);
-
-        System.out.println("[P2P Agent] Transformers enregistrés — en attente du chargement Minecraft");
+        System.out.println("[P2P Agent] Prêt — en attente du chargement Minecraft");
     }
 
-    // Requis pour retransformation dynamique (optionnel, bonne pratique)
     public static void agentmain(String agentArgs, Instrumentation inst) {
         premain(agentArgs, inst);
-    }
-
-    static class UnifiedTransformer implements ClassFileTransformer {
-
-        @Override
-        public byte[] transform(ClassLoader loader, String className,
-                Class<?> classBeingRedefined, ProtectionDomain protectionDomain,
-                byte[] classfileBuffer) {
-
-            if (className == null || !className.startsWith("net/minecraft/")) return null;
-
-            try {
-                byte[] result = switch (className) {
-                    case "net/minecraft/server/level/ServerLevel"
-                        -> ServerLevelTransformer.transform(classfileBuffer);
-
-                    case "net/minecraft/world/level/chunk/LevelChunk"
-                        -> ChunkTransformer.transform(classfileBuffer);
-
-                    case "net/minecraft/world/entity/Entity"
-                        -> EntityTransformer.transform(classfileBuffer);
-
-                    case "net/minecraft/client/Minecraft"
-                        -> MinecraftTransformer.transform(classfileBuffer);
-
-                    default -> null;
-                };
-                if (result != null) {
-                    System.out.println("[P2P Agent] Transformé : " + className
-                        + " (" + classfileBuffer.length + " → " + result.length + " octets)");
-                }
-                return result;
-            } catch (Exception e) {
-                System.err.println("[P2P Agent] ERREUR transformation " + className + " : " + e.getMessage());
-                e.printStackTrace(System.err);
-                return null; // Fallback sur classe originale
-            }
-        }
     }
 }

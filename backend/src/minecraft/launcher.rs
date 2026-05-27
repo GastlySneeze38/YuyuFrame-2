@@ -282,22 +282,34 @@ pub async fn download_and_launch(
 
         let mapped = p2p::ensure_mapped_jar(version_id, &client_jar, &client, &app, &java).await?;
 
-        let agent_jar = p2p::p2p_dir().join("p2p-agent.jar");
+        let mixin_jar  = p2p::p2p_dir().join("mixin.jar");
+        let agent_jar  = p2p::p2p_dir().join("p2p-agent.jar");
+
+        if !mixin_jar.exists() {
+            return Err(anyhow!(
+                "mixin.jar manquant dans {}\n  Copier P2P-Server/p2p-agent/lib/mixin.jar vers ce dossier",
+                p2p::p2p_dir().display()
+            ));
+        }
         if !agent_jar.exists() {
             return Err(anyhow!(
-                "p2p-agent.jar manquant dans {}\n  Copier P2P-Test/p2p-agent/build/p2p-agent.jar vers ce dossier",
+                "p2p-agent.jar manquant dans {}\n  Compiler P2P-Server/p2p-agent/ et copier le JAR vers ce dossier",
                 p2p::p2p_dir().display()
             ));
         }
 
-        let peer_id  = uuid::Uuid::new_v4().to_string();
-        let agent_arg = format!(
+        let peer_id    = uuid::Uuid::new_v4().to_string();
+        // mixin.jar DOIT être listé AVANT p2p-agent.jar : MixinAgent.premain() capture
+        // l'Instrumentation que MixinBootstrap.init() utilisera ensuite.
+        let mixin_arg  = format!("-javaagent:{}", mixin_jar.display());
+        let agent_arg  = format!(
             "-javaagent:{}=peerId={},name={},server=ws://127.0.0.1:{}",
             agent_jar.display(), peer_id, session.username, p2p::SIGNALING_PORT,
         );
 
-        log_to_console(&app, &console_label, &format!("[P2P] Agent : {}", agent_arg), "out");
-        (mapped, vec![agent_arg])
+        log_to_console(&app, &console_label, &format!("[P2P] Mixin  : {}", mixin_arg), "out");
+        log_to_console(&app, &console_label, &format!("[P2P] Agent  : {}", agent_arg), "out");
+        (mapped, vec![mixin_arg, agent_arg])
     } else {
         (client_jar.clone(), vec![])
     };
