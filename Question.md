@@ -1,0 +1,1 @@
+j'ai lancer sur la meme machine et quand B a rejoin le server ne s'est pas syncroniser mais c'est peut etre car le renderer n'accepte pas pour l'instant les requetes en dehors de sont server intégrer ?

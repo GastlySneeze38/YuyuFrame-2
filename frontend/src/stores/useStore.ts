@@ -57,7 +57,11 @@ interface Store {
   instanceSyncMode: 'db_wins' | 'disk_wins'
   setInstanceSyncMode: (mode: 'db_wins' | 'disk_wins') => void
 
-  // ── Game state ─────────────────────────────────────────────────────────────
+  // ── Game state (par instance) ─────────────────────────────────────────────
+  runningInstances: string[]
+  isInstanceRunning: (id: string) => boolean
+  setInstanceRunning: (id: string, running: boolean) => void
+  /** true si au moins une instance tourne (rétro-compat) */
   gameRunning: boolean
   setGameRunning: (r: boolean) => void
 
@@ -165,7 +169,16 @@ export const useStore = create<Store>()(
       instanceSyncMode: 'db_wins',
       setInstanceSyncMode: (instanceSyncMode) => set({ instanceSyncMode }),
 
-      // Game
+      // Game (multi-instance)
+      runningInstances: [],
+      isInstanceRunning: (id) => get().runningInstances.includes(id),
+      setInstanceRunning: (id, running) =>
+        set((s) => ({
+          runningInstances: running
+            ? s.runningInstances.includes(id) ? s.runningInstances : [...s.runningInstances, id]
+            : s.runningInstances.filter((x) => x !== id),
+          gameRunning: running ? true : s.runningInstances.filter((x) => x !== id).length > 0,
+        })),
       gameRunning: false,
       setGameRunning: (gameRunning) => set({ gameRunning }),
 

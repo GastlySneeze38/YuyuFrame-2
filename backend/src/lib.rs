@@ -62,7 +62,7 @@ pub fn run() {
                 yuyu_session,
                 session: mc_session,
                 download_progress: None,
-                game_running: false,
+                running_instances: std::collections::HashSet::new(),
                 auth_device_code: None,
             }));
 

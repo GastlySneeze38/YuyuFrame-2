@@ -60,8 +60,17 @@ pub struct AppState {
     pub yuyu_session: Option<YuyuSession>,
     pub session: Option<MinecraftSession>,
     pub download_progress: Option<DownloadProgress>,
-    pub game_running: bool,
+    pub running_instances: std::collections::HashSet<String>,
     pub auth_device_code: Option<AuthDeviceCode>,
+}
+
+impl AppState {
+    pub fn is_instance_running(&self, id: &str) -> bool {
+        self.running_instances.contains(id)
+    }
+    pub fn any_running(&self) -> bool {
+        !self.running_instances.is_empty()
+    }
 }
 
 pub type SharedState = Arc<RwLock<AppState>>;

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useNavigate, useLocation } from 'react-router-dom'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { TitleBar } from '@/components/TitleBar'
 import Login from '@/pages/Login'
 import Home from '@/pages/Home'
@@ -15,6 +16,9 @@ import Stats from '@/pages/Stats'
 import Server from '@/pages/Server'
 import { useStore } from '@/stores/useStore'
 import { api } from '@/api/client'
+
+const isConsoleWindow = getCurrentWindow().label.startsWith('mc-console-')
+
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -33,11 +37,16 @@ export default function App() {
   const { brightness, instanceSyncMode, setInstances } = useStore()
 
   useEffect(() => {
+    if (isConsoleWindow) return
     api.instances.startupSync(instanceSyncMode)
       .then(() => api.instances.list())
       .then(setInstances)
       .catch(() => {})
   }, [])
+
+  if (isConsoleWindow) {
+    return <Console />
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-primary">
@@ -46,7 +55,6 @@ export default function App() {
         <Routes>
           {/* YuyuFrame account gate — always accessible */}
           <Route path="/yuyu" element={<YuyuLogin />} />
-          <Route path="/console" element={<Console />} />
 
           {/* Protected routes */}
           <Route

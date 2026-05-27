@@ -32,10 +32,12 @@ export default function Home() {
     clearUser,
     instances, setInstances,
     selectedInstanceId, setSelectedInstanceId, selectedInstance,
-    gameRunning, setGameRunning,
+    isInstanceRunning, setInstanceRunning,
     lastSession, setLastSession,
     closeOnLaunch,
   } = useStore()
+
+  const gameRunning = !!selectedInstanceId && isInstanceRunning(selectedInstanceId)
 
   const [progress, setProgress] = useState<DownloadProgress | null>(null)
   const [launchMsg, setLaunchMsg] = useState('')
@@ -72,9 +74,10 @@ export default function Home() {
       setProgress(event.payload)
     }).then((fn) => { unlistenProgress = fn })
 
-    listen<{ running: boolean }>('game_state', (event) => {
-      setGameRunning(event.payload.running)
-      if (!event.payload.running) {
+    listen<{ running: boolean; instance_id: string }>('game_state', (event) => {
+      const { running, instance_id } = event.payload
+      setInstanceRunning(instance_id, running)
+      if (!running) {
         setProgress(null)
         getCurrentWindow().show()
       }
@@ -82,7 +85,7 @@ export default function Home() {
 
     listen<string>('launch_error', (event) => {
       setLaunchMsg(event.payload)
-      setGameRunning(false)
+      if (selectedInstanceId) setInstanceRunning(selectedInstanceId, false)
       setProgress(null)
     }).then((fn) => { unlistenError = fn })
 
@@ -110,7 +113,7 @@ export default function Home() {
     setLaunchMsg('')
     try {
       await api.launch.start(selectedInstanceId)
-      setGameRunning(true)
+      setInstanceRunning(selectedInstanceId, true)
       if (instance) setLastSession({ instanceName: instance.name, at: new Date().toISOString() })
       if (closeOnLaunch) getCurrentWindow().hide()
     } catch (e) {

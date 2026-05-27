@@ -8,6 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+use tauri::Manager;
 use crate::state::{DownloadProgress, MinecraftSession, SharedState};
 use super::deps;
 use super::fabric;
@@ -32,8 +33,20 @@ fn set_progress(app: &tauri::AppHandle, current: u64, total: u64, message: &str)
     });
 }
 
+/// Émet un game_log vers la fenêtre console dédiée à cette instance.
+/// Fallback sur broadcast global si la fenêtre n'existe plus.
+fn log_to_console(app: &tauri::AppHandle, console_label: &str, line: &str, level: &str) {
+    let payload = serde_json::json!({ "line": line, "level": level });
+    if let Some(win) = app.get_webview_window(console_label) {
+        let _ = win.emit("game_log", &payload);
+    } else {
+        let _ = app.emit("game_log", &payload);
+    }
+}
+
 /// `loader` — "vanilla" | "fabric" | "forge" (None treated as vanilla)
 /// `game_dir` — instance directory (saves, mods, configs); shared assets stay in minecraft_dir()
+/// `console_label` — label de la fenêtre console à cibler pour les game_log
 pub async fn download_and_launch(
     version_id: &str,
     loader: Option<&str>,
@@ -43,6 +56,7 @@ pub async fn download_and_launch(
     app: tauri::AppHandle,
     state: SharedState,
     p2p: bool,
+    console_label: &str,
 ) -> Result<()> {
     let mc_dir = minecraft_dir();
     tokio::fs::create_dir_all(game_dir).await?;
@@ -241,7 +255,8 @@ pub async fn download_and_launch(
         .unwrap_or("jre-legacy"); // composant Mojang pour Java 8
     let java = ensure_java(java_component, required_java, &mc_dir, &client, &app).await?;
     let java_major = detect_java_major_version(&java).await.unwrap_or(17);
-    let _ = app.emit("game_log", serde_json::json!({ "line": format!("MC {} requiert Java {} — utilise : {}", version_id, required_java, java), "level": "out" }));
+    let console_label = console_label.to_string();
+    log_to_console(&app, &console_label, &format!("MC {} requiert Java {} — utilise : {}", version_id, required_java, java), "out");
 
     let (main_class, extra_classpath, extra_game_args, extra_jvm_args) =
         match loader.unwrap_or("vanilla") {
@@ -281,7 +296,7 @@ pub async fn download_and_launch(
             agent_jar.display(), peer_id, session.username, p2p::SIGNALING_PORT,
         );
 
-        let _ = app.emit("game_log", serde_json::json!({ "line": format!("[P2P] Agent : {}", agent_arg), "level": "out" }));
+        log_to_console(&app, &console_label, &format!("[P2P] Agent : {}", agent_arg), "out");
         (mapped, vec![agent_arg])
     } else {
         (client_jar.clone(), vec![])
@@ -308,7 +323,7 @@ pub async fn download_and_launch(
     } else {
         format!("Java {} détecté — G1GC client activé", java_major)
     };
-    let _ = app.emit("game_log", serde_json::json!({ "line": gc_msg, "level": "out" }));
+    log_to_console(&app, &console_label, &gc_msg, "out");
     args.extend(extra_jvm_args);
     args.extend(p2p_jvm_args);
     args.extend(["-cp".to_string(), classpath_str, main_class]);
@@ -329,6 +344,7 @@ pub async fn download_and_launch(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_tailer = stop_flag.clone();
     let app_log = app.clone();
+    let label_log = console_label.clone();
 
     let mut child = tokio::process::Command::new(&java)
         .args(&args)
@@ -342,14 +358,16 @@ pub async fn download_and_launch(
     let stderr = child.stderr.take().map(BufReader::new);
 
     let app_out = app.clone();
+    let label_out = console_label.clone();
     let app_err = app.clone();
+    let label_err = console_label.clone();
 
     if let Some(mut reader) = stdout {
         tokio::spawn(async move {
             let mut line = String::new();
             while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
                 let trimmed = line.trim_end().to_string();
-                let _ = app_out.emit("game_log", serde_json::json!({ "line": trimmed, "level": "out" }));
+                log_to_console(&app_out, &label_out, &trimmed, "out");
                 line.clear();
             }
         });
@@ -360,7 +378,7 @@ pub async fn download_and_launch(
             let mut line = String::new();
             while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
                 let trimmed = line.trim_end().to_string();
-                let _ = app_err.emit("game_log", serde_json::json!({ "line": trimmed, "level": "err" }));
+                log_to_console(&app_err, &label_err, &trimmed, "err");
                 line.clear();
             }
         });
@@ -397,10 +415,7 @@ pub async fn download_and_launch(
                                         pos += n as u64;
                                         let trimmed = line.trim_end().to_string();
                                         if !trimmed.is_empty() {
-                                            let _ = app_log.emit("game_log", serde_json::json!({
-                                                "line": trimmed,
-                                                "level": "out"
-                                            }));
+                                            log_to_console(&app_log, &label_log, &trimmed, "out");
                                         }
                                     }
                                     Err(_) => break,

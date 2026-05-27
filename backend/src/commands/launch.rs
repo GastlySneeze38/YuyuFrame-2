@@ -17,8 +17,8 @@ pub async fn launch_game(
         s.session.clone().ok_or("Non connecté à Minecraft")?
     };
 
-    if state.read().await.game_running {
-        return Err("Le jeu est déjà en cours".into());
+    if state.read().await.is_instance_running(&instance_id) {
+        return Err(format!("L'instance {} est déjà en cours", instance_id));
     }
 
     let yuyu_user_id = {
@@ -45,22 +45,26 @@ pub async fn launch_game(
     let game_dir = instance_dir(&instance_id);
     tokio::fs::create_dir_all(&game_dir).await.map_err(|e| e.to_string())?;
 
-    // Open or reopen the console window
-    if let Some(existing) = app.get_webview_window("minecraft-console") {
+    // Open or reopen the console window (label unique par instance)
+    let window_label = format!("mc-console-{}", &instance_id[..8.min(instance_id.len())]);
+    if let Some(existing) = app.get_webview_window(&window_label) {
         let _ = existing.close();
     }
     let _ = tauri::WebviewWindowBuilder::new(
         &app,
-        "minecraft-console",
-        tauri::WebviewUrl::App(std::path::PathBuf::from("#/console")),
+        &window_label,
+        tauri::WebviewUrl::App(std::path::PathBuf::from("console")),
     )
-    .title("Console Minecraft")
+    .title(format!("Console — {}", instance.name))
     .inner_size(960.0, 620.0)
     .decorations(false)
     .build();
 
-    state.write().await.game_running = true;
-    let _ = app.emit("game_state", serde_json::json!({ "running": true }));
+    state.write().await.running_instances.insert(instance_id.clone());
+    let _ = app.emit("game_state", serde_json::json!({
+        "running": true,
+        "instance_id": &instance_id,
+    }));
 
     let state_clone = state.inner().clone();
 
@@ -90,6 +94,7 @@ pub async fn launch_game(
             app.clone(),
             state_clone.clone(),
             p2p.unwrap_or(false),
+            &window_label,
         )
         .await
         {
@@ -104,8 +109,11 @@ pub async fn launch_game(
             let _ = db::session_end(&db, sid, duration);
         }
 
-        state_clone.write().await.game_running = false;
-        let _ = app.emit("game_state", serde_json::json!({ "running": false }));
+        state_clone.write().await.running_instances.remove(&instance_id);
+        let _ = app.emit("game_state", serde_json::json!({
+            "running": false,
+            "instance_id": &instance_id,
+        }));
     });
 
     Ok(())

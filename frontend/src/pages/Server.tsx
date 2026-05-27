@@ -9,31 +9,29 @@ export default function Server() {
   const navigate = useNavigate()
   const {
     username,
-    instances, setInstances,
     selectedInstanceId, selectedInstance,
-    gameRunning, setGameRunning,
+    isInstanceRunning, setInstanceRunning,
     closeOnLaunch,
   } = useStore()
+
+  const gameRunning = !!selectedInstanceId && isInstanceRunning(selectedInstanceId)
 
   const [launchMsg, setLaunchMsg] = useState('')
   const instance = selectedInstance()
 
   useEffect(() => {
-    api.instances.list().then(setInstances).catch(() => {})
-  }, [])
-
-  useEffect(() => {
     let unlistenState: (() => void) | null = null
     let unlistenError: (() => void) | null = null
 
-    listen<{ running: boolean }>('game_state', (event) => {
-      setGameRunning(event.payload.running)
-      if (!event.payload.running) getCurrentWindow().show()
+    listen<{ running: boolean; instance_id: string }>('game_state', (event) => {
+      const { running, instance_id } = event.payload
+      setInstanceRunning(instance_id, running)
+      if (!running) getCurrentWindow().show()
     }).then((fn) => { unlistenState = fn })
 
     listen<string>('launch_error', (event) => {
       setLaunchMsg(event.payload)
-      setGameRunning(false)
+      if (selectedInstanceId) setInstanceRunning(selectedInstanceId, false)
     }).then((fn) => { unlistenError = fn })
 
     return () => {
@@ -47,7 +45,7 @@ export default function Server() {
     setLaunchMsg('')
     try {
       await api.launch.startP2p(selectedInstanceId)
-      setGameRunning(true)
+      setInstanceRunning(selectedInstanceId, true)
       if (closeOnLaunch) getCurrentWindow().hide()
     } catch (e) {
       setLaunchMsg(e instanceof Error ? e.message : 'Erreur de lancement')
