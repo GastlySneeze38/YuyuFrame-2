@@ -41,10 +41,14 @@ public class DistributedChunkManager {
         return result;
     }
 
+    public static int getMyChunkX() { return myX; }
+    public static int getMyChunkZ() { return myZ; }
+
     public static void afterChunkTick(int cx, int cz) {
-        // Applique les blocs reçus + commandes ghost (thread serveur)
+        // Applique les blocs reçus + commandes ghost + snapshots (thread serveur)
         BlockSyncManager.flushPendingChanges();
         GhostManager.flush();
+        SnapshotManager.flush();
 
         long now = System.currentTimeMillis();
         if (now - lastPositionBroadcast > 2000) {
@@ -67,6 +71,8 @@ public class DistributedChunkManager {
             BlockSyncManager.handleReceived(data);
         } else if (type == PlayerSyncManager.TYPE_PLAYER) {
             PlayerSyncManager.handleReceived(fromId, data);
+        } else if (type == SnapshotManager.TYPE_SNAPSHOT) {
+            SnapshotManager.handleReceived(data);
         } else {
             System.out.println("[P2P] Message inconnu (type=0x" + Integer.toHexString(type & 0xFF)
                 + ") de " + fromId.substring(0, Math.min(8, fromId.length())));
@@ -88,15 +94,25 @@ public class DistributedChunkManager {
         if (RustBridge.NATIVE_LOADED) RustBridge.setMyPosition(cx, cz);
     }
 
+    /** Pair qui vient d'arriver (peer_joined) — lui envoyer le snapshot. */
     public static void upsertPeer(String peerId, int x, int z) {
+        boolean isNew = fallbackPeers.put(peerId, new int[]{x, z}) == null;
+        if (RustBridge.NATIVE_LOADED) RustBridge.upsertPeer(peerId, x, z);
+        if (isNew) SnapshotManager.onNewPeer(peerId);
+    }
+
+    /** Pair déjà présent dans la peer_list initiale — ne pas lui envoyer de snapshot. */
+    public static void registerExistingPeer(String peerId, int x, int z) {
         fallbackPeers.put(peerId, new int[]{x, z});
         if (RustBridge.NATIVE_LOADED) RustBridge.upsertPeer(peerId, x, z);
+        SnapshotManager.markKnown(peerId);
     }
 
     public static void removePeer(String peerId) {
         fallbackPeers.remove(peerId);
         if (RustBridge.NATIVE_LOADED) RustBridge.removePeer(peerId);
         GhostManager.removeGhost(peerId);
+        SnapshotManager.onPeerLeft(peerId);
     }
 
     public static int myChunkCount() {

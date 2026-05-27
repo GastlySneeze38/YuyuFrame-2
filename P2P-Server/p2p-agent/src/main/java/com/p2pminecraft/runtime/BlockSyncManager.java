@@ -96,7 +96,7 @@ public class BlockSyncManager {
 
             RECEIVING.set(true);
             try {
-                callSetBlock(level, pos, state);
+                callSetBlock(level, pos, state, 3);
                 System.out.println("[P2P] Bloc appliqué: " + blockId + " @ " + x + "," + y + "," + z);
             } finally {
                 RECEIVING.set(false);
@@ -121,20 +121,20 @@ public class BlockSyncManager {
         return null;
     }
 
-    private static Object createBlockPos(int x, int y, int z) throws Exception {
+    static Object createBlockPos(int x, int y, int z) throws Exception {
         Class<?> cls = Class.forName("net.minecraft.core.BlockPos");
         return cls.getConstructor(int.class, int.class, int.class).newInstance(x, y, z);
     }
 
     private static volatile Object cachedBlockRegistry = null;
 
-    private static Object blockRegistry() throws Exception {
+    static Object blockRegistry() throws Exception {
         if (cachedBlockRegistry != null) return cachedBlockRegistry;
         Class<?> c = Class.forName("net.minecraft.core.registries.BuiltInRegistries");
         return cachedBlockRegistry = c.getField("BLOCK").get(null);
     }
 
-    private static Object parseResourceLocation(String id) throws Exception {
+    static Object parseResourceLocation(String id) throws Exception {
         Class<?> cls = Class.forName("net.minecraft.resources.ResourceLocation");
         try {
             return cls.getMethod("parse", String.class).invoke(null, id);
@@ -143,7 +143,7 @@ public class BlockSyncManager {
         }
     }
 
-    private static Object lookupBlockState(String blockId) throws Exception {
+    static Object lookupBlockState(String blockId) throws Exception {
         Object registry = blockRegistry();
         Object rl = parseResourceLocation(blockId);
 
@@ -159,13 +159,13 @@ public class BlockSyncManager {
         return null;
     }
 
-    private static void callSetBlock(Object level, Object pos, Object state) throws Exception {
+    static void callSetBlock(Object level, Object pos, Object state, int flags) throws Exception {
         for (Method m : level.getClass().getMethods()) {
             if (!m.getName().equals("setBlock") || m.getParameterCount() != 3) continue;
             Class<?>[] params = m.getParameterTypes();
             if (!params[2].equals(int.class)) continue;
             if (!params[0].getName().contains("BlockPos")) continue;
-            m.invoke(level, pos, state, 3);
+            m.invoke(level, pos, state, flags);
             return;
         }
         throw new NoSuchMethodException("Level.setBlock(BlockPos,BlockState,int) introuvable");

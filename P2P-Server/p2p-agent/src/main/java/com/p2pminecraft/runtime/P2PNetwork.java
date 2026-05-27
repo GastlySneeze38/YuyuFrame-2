@@ -188,7 +188,7 @@ public class P2PNetwork {
     }
 
     private void handlePeerList(String json) {
-        // peers:[{id,name,x,z}, ...]
+        // peers:[{id,name,x,z}, ...]  — pairs déjà présents, pas de snapshot vers eux
         int start = json.indexOf("\"peers\"");
         if (start < 0) return;
         String arr = json.substring(start);
@@ -197,7 +197,7 @@ public class P2PNetwork {
             String id = extractFrom(arr, "id", idx);
             int x = extractIntFrom(arr, "x", idx);
             int z = extractIntFrom(arr, "z", idx);
-            if (id != null) DistributedChunkManager.upsertPeer(id, x, z);
+            if (id != null) DistributedChunkManager.registerExistingPeer(id, x, z);
             idx++;
         }
         System.out.println("[P2P] " + DistributedChunkManager.stats());
