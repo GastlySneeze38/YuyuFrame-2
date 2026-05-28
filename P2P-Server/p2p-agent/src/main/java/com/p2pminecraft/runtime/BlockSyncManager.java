@@ -22,6 +22,8 @@ public class BlockSyncManager {
 
     // ── Enregistrement du niveau ───────────────────────────────────────────────
 
+    public static Object getStoredLevel() { return levelRef.get(); }
+
     public static void registerLevel(Object level) {
         if (level == null) return;
         if (MappingsRegistry.isInstance(level, "net/minecraft/server/level/ServerLevel")) {
@@ -31,8 +33,10 @@ public class BlockSyncManager {
 
     // ── Outbound ───────────────────────────────────────────────────────────────
 
-    public static void notifyBlockChanged(int x, int y, int z, Object newState, Object level) {
-        if (RECEIVING.get() || newState == null || level == null) return;
+    // pos = Object (BlockPos / is à runtime) — coords extraites par réflexion sur Vec3i (jy).
+    // Évite que LevelChunkMixin ait des paramètres typés MC non remappés dans le handler.
+    public static void notifyBlockChanged(Object pos, Object newState, Object level) {
+        if (RECEIVING.get() || pos == null || newState == null || level == null) return;
         if (!MappingsRegistry.isInstance(level, "net/minecraft/server/level/ServerLevel")) return;
 
         P2PNetwork net = RuntimeInitializer.getNetwork();
@@ -40,6 +44,10 @@ public class BlockSyncManager {
 
         String blockId = getBlockId(newState);
         if (blockId == null) return;
+
+        int x = getVec3iCoord(pos, "getX");
+        int y = getVec3iCoord(pos, "getY");
+        int z = getVec3iCoord(pos, "getZ");
 
         byte[] idBytes = blockId.getBytes(StandardCharsets.UTF_8);
         ByteBuffer buf = ByteBuffer.allocate(1 + 4 + 4 + 4 + 2 + idBytes.length);
@@ -50,6 +58,25 @@ public class BlockSyncManager {
         buf.putShort((short) idBytes.length);
         buf.put(idBytes);
         net.broadcastData(buf.array());
+    }
+
+    // Vec3i.getX()→u, getY()→v, getZ()→w (client-mappings-1.21.11, Vec3i=jy)
+    // BlockPos (is) hérite de Vec3i (jy) → cherche en remontant la hiérarchie.
+    static int getVec3iCoord(Object blockPos, String mojangGetter) {
+        String obf = MappingsRegistry.getObfMethodName("net/minecraft/core/Vec3i", mojangGetter);
+        Class<?> cls = blockPos.getClass();
+        while (cls != null && cls != Object.class) {
+            try {
+                java.lang.reflect.Method m = cls.getDeclaredMethod(obf);
+                m.setAccessible(true);
+                return (int) m.invoke(blockPos);
+            } catch (NoSuchMethodException ignored) {
+                cls = cls.getSuperclass();
+            } catch (Exception e) {
+                break;
+            }
+        }
+        return 0;
     }
 
     // ── Inbound ────────────────────────────────────────────────────────────────

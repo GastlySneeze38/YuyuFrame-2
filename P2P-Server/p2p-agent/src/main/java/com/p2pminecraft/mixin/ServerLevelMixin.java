@@ -20,7 +20,9 @@ public abstract class ServerLevelMixin {
     // tickTime() → d()V en obfusqué dans axf (client-mappings-1.21.11 ligne ~73922)
     @Inject(method = "d()V", at = @At("HEAD"))
     private void p2p$tickTimeHead(CallbackInfo ci) {
-        System.out.println("[P2P HOOK] tickTime fired!");
+        // Enregistrer ce ServerLevel pour que LevelChunkMixin puisse l'utiliser
+        // sans @Shadow (qui nécessiterait un ClassInfo complet du JAR obfusqué).
+        com.p2pminecraft.runtime.BlockSyncManager.registerLevel((Object) this);
         try {
             java.nio.file.Path f = java.nio.file.Paths.get(
                 System.getenv("APPDATA"), "YuyuFrame\\p2p\\Log\\p2p_hook.txt");
