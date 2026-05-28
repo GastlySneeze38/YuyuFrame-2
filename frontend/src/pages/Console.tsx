@@ -72,6 +72,8 @@ export default function Console() {
   }, [])
 
   useEffect(() => {
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed) return
     bottomRef.current?.scrollIntoView({ behavior: 'instant' })
   }, [logs])
 
@@ -139,7 +141,7 @@ export default function Console() {
       </div>
 
       {/* Logs */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3" style={{ overflowAnchor: 'none' }}>
+      <div className="selectable min-h-0 flex-1 overflow-y-auto px-4 py-3" style={{ overflowAnchor: 'none' }}>
         {logs.length === 0 && (
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.18)', margin: 0 }}>
             En attente des logs...

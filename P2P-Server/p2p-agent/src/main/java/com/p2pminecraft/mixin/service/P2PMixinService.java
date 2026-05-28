@@ -9,7 +9,8 @@ import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
 import org.spongepowered.asm.mixin.transformer.IMixinTransformerFactory;
 import org.spongepowered.asm.service.*;
 import org.spongepowered.asm.util.ReEntranceLock;
-import org.spongepowered.tools.agent.MixinAgent;
+
+import java.lang.instrument.Instrumentation;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,6 +23,12 @@ import java.util.Collections;
  * Enregistré via META-INF/services, sélectionné car isValid() = true.
  */
 public class P2PMixinService implements IMixinService, IClassProvider, IClassBytecodeProvider {
+
+    private static Instrumentation savedInst;
+
+    public static void setInstrumentation(Instrumentation inst) {
+        savedInst = inst;
+    }
 
     private final ReEntranceLock lock = new ReEntranceLock(1);
     private final IContainerHandle container =
@@ -36,22 +43,18 @@ public class P2PMixinService implements IMixinService, IClassProvider, IClassByt
     @Override public void beginPhase() {}
     @Override
     public void offer(IMixinInternal internal) {
-        System.out.println("[P2P] offer() reçu : " + internal.getClass().getName());
-        for (Class<?> iface : internal.getClass().getInterfaces()) {
-            System.out.println("[P2P]   iface: " + iface.getName() + " (CL: " + iface.getClassLoader() + ")");
-        }
-        System.out.println("[P2P]   IMixinTransformerFactory CL: " + IMixinTransformerFactory.class.getClassLoader());
-        System.out.println("[P2P]   instanceof check: " + (internal instanceof IMixinTransformerFactory));
-
-        if (internal instanceof IMixinTransformerFactory) {
-            try {
-                IMixinTransformer transformer = ((IMixinTransformerFactory) internal).createTransformer();
-                new MixinAgent(transformer);
-                System.out.println("[P2P] MixinAgent installé — ClassFileTransformer actif");
-            } catch (Exception e) {
-                System.err.println("[P2P] Erreur installation MixinAgent: " + e.getMessage());
-                e.printStackTrace(System.err);
+        if (!(internal instanceof IMixinTransformerFactory)) return;
+        try {
+            IMixinTransformer transformer = ((IMixinTransformerFactory) internal).createTransformer();
+            if (savedInst != null) {
+                savedInst.addTransformer(new P2PMixinTransformerWrapper(transformer), true);
+                System.out.println("[P2P] ClassFileTransformer Mixin installé via instrumentation P2P");
+            } else {
+                System.err.println("[P2P] WARN: savedInst null — transformer non installé");
             }
+        } catch (Exception e) {
+            System.err.println("[P2P] Erreur offer(): " + e.getMessage());
+            e.printStackTrace(System.err);
         }
     }
     @Override public void checkEnv(Object bootSource)    {}

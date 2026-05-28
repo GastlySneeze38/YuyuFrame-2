@@ -9,5 +9,5 @@ import net.minecraft.world.level.block.state.BlockState;
 public class LevelChunk {
     public Level level;
     public ChunkPos getPos() { return null; }
-    public BlockState setBlockState(BlockPos pos, BlockState state, boolean isMoving) { return null; }
+    public BlockState setBlockState(BlockPos pos, BlockState state, int flags) { return null; }
 }

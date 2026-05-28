@@ -1,5 +1,6 @@
 package com.p2pminecraft.agent;
 
+import com.p2pminecraft.mixin.service.P2PMixinService;
 import com.p2pminecraft.runtime.MappingsRegistry;
 import com.p2pminecraft.runtime.RuntimeInitializer;
 import org.spongepowered.asm.launch.MixinBootstrap;
@@ -24,6 +25,9 @@ public class P2PAgent {
 
     public static void premain(String agentArgs, Instrumentation inst) {
         System.out.println("[P2P Agent] Démarrage (mode Mixin)...");
+
+        // Sauvegarder l'Instrumentation pour que offer() puisse l'utiliser
+        P2PMixinService.setInstrumentation(inst);
 
         AgentConfig config = AgentConfig.parse(agentArgs);
         System.out.println("[P2P Agent] peerId=" + config.peerId + " name=" + config.peerName);
@@ -55,6 +59,10 @@ public class P2PAgent {
             // contrairement à addConfiguration(String) qui passe null → NPE dans MixinConfig.onLoad()
             Mixins.addConfiguration("mixins.p2p.json", (IMixinConfigSource) null);
             System.out.println("[P2P Agent] Mixin initialisé — LevelChunkMixin enregistré");
+
+            // eqq (LevelChunk) et axf (ServerLevel) sont chargés AVANT addTransformer
+            // → on les retransforme maintenant que la config est enregistrée
+            retransformEarlyLoadedTargets(inst);
         } catch (Exception e) {
             System.err.println("[P2P Agent] ERREUR Mixin bootstrap : " + e.getMessage());
             e.printStackTrace(System.err);
@@ -63,7 +71,59 @@ public class P2PAgent {
         // Démarre le réseau P2P (P2PNetwork, WebSocket signaling)
         RuntimeInitializer.onGameStart();
 
+        // Retransformation différée : certaines classes peuvent être chargées plus tard
+        scheduleDelayedRetransform(inst);
+
         System.out.println("[P2P Agent] Prêt — en attente du chargement Minecraft");
+    }
+
+    /** Retransforme eqq/axf s'ils ont été chargés avant notre addTransformer. */
+    private static void retransformEarlyLoadedTargets(Instrumentation inst) {
+        try {
+            int count = 0;
+            for (Class<?> cls : inst.getAllLoadedClasses()) {
+                String name = cls.getName();
+                if (name.equals("eqq") || name.equals("axf")) {
+                    System.out.println("[P2P Agent] Retransformation immédiate: " + name);
+                    if (inst.isModifiableClass(cls)) {
+                        inst.retransformClasses(cls);
+                        count++;
+                    }
+                }
+            }
+            System.out.println("[P2P Agent] Retransformations immédiates: " + count);
+        } catch (Throwable t) {
+            System.err.println("[P2P Agent] Retransform immédiat erreur: " + t);
+        }
+    }
+
+    /** Lance un thread qui retransforme eqq/axf dès qu'ils apparaissent dans les classes chargées. */
+    private static void scheduleDelayedRetransform(Instrumentation inst) {
+        Thread t = new Thread(() -> {
+            long deadline = System.currentTimeMillis() + 30_000;
+            boolean foundEqq = false, foundAxf = false;
+            while (System.currentTimeMillis() < deadline && !(foundEqq && foundAxf)) {
+                try { Thread.sleep(200); } catch (InterruptedException e) { return; }
+                for (Class<?> cls : inst.getAllLoadedClasses()) {
+                    String name = cls.getName();
+                    if (!foundEqq && name.equals("eqq")) {
+                        foundEqq = true;
+                        System.out.println("[P2P Agent] Retransformation différée: eqq");
+                        try { if (inst.isModifiableClass(cls)) inst.retransformClasses(cls); }
+                        catch (Throwable ex) { System.err.println("[P2P Agent] Retransform eqq erreur: " + ex); }
+                    }
+                    if (!foundAxf && name.equals("axf")) {
+                        foundAxf = true;
+                        System.out.println("[P2P Agent] Retransformation différée: axf");
+                        try { if (inst.isModifiableClass(cls)) inst.retransformClasses(cls); }
+                        catch (Throwable ex) { System.err.println("[P2P Agent] Retransform axf erreur: " + ex); }
+                    }
+                }
+            }
+            System.out.println("[P2P Agent] Thread retransform terminé (eqq=" + foundEqq + " axf=" + foundAxf + ")");
+        }, "P2P-Retransform");
+        t.setDaemon(true);
+        t.start();
     }
 
     public static void agentmain(String agentArgs, Instrumentation inst) {
