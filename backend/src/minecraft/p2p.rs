@@ -143,8 +143,7 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
 
                         // Informe les machines distantes qu'un pair a rejoint
                         if let Some(handle) = P2PLibp2pHandle::get_global() {
-                            let fwd = raw.clone();
-                            tokio::spawn(async move { let _ = handle.send_json(fwd).await; });
+                            handle.try_send_json(raw.clone());
                         }
 
                         tracing::info!("[P2P Signaling] + {} ({}...)", name, &id[..8.min(id.len())]);
@@ -156,8 +155,7 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                         send_all(&peers, &id, &raw);
                         // Propage la position aux machines distantes
                         if let Some(handle) = P2PLibp2pHandle::get_global() {
-                            let fwd = raw.clone();
-                            tokio::spawn(async move { let _ = handle.send_json(fwd).await; });
+                            handle.try_send_json(raw.clone());
                         }
                     }
                     Ok(Msg::Data { ref from, ref to, ref payload }) => {
@@ -180,10 +178,7 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                                 };
                                 if !delivered_locally {
                                     if let Some(handle) = P2PLibp2pHandle::get_global() {
-                                        let out2 = out;
-                                        tokio::spawn(async move {
-                                            let _ = handle.send_json(out2).await;
-                                        });
+                                        handle.try_send_json(out);
                                     }
                                 }
                             }
@@ -191,10 +186,7 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                                 // Broadcast local + inter-machine via libp2p
                                 send_all(&peers, from, &out);
                                 if let Some(handle) = P2PLibp2pHandle::get_global() {
-                                    let out2 = out.clone();
-                                    tokio::spawn(async move {
-                                        let _ = handle.send_json(out2).await;
-                                    });
+                                    handle.try_send_json(out.clone());
                                 }
                             }
                         }
@@ -219,8 +211,7 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
         send_all(&peers, &id, &left);
         // Informe les machines distantes que le pair est parti
         if let Some(handle) = P2PLibp2pHandle::get_global() {
-            let fwd = left.clone();
-            tokio::spawn(async move { let _ = handle.send_json(fwd).await; });
+            handle.try_send_json(left.clone());
         }
         tracing::info!("[P2P Signaling] - {} déconnecté", name);
     }

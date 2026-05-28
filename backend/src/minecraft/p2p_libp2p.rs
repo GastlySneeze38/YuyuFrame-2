@@ -245,6 +245,12 @@ impl P2PLibp2pHandle {
             .context("Swarm arrêté")
     }
 
+    /// Version non-async pour appel depuis un std::thread (signaling server).
+    /// Fire-and-forget : si le canal est plein le message est droppé.
+    pub fn try_send_json(&self, json: String) {
+        let _ = self.cmd_tx.try_send(Cmd::Send(json));
+    }
+
     /// Retourne le PeerID local encodé en base58 (code de session à partager)
     pub fn session_code(&self) -> String {
         self.peer_id.to_string()
