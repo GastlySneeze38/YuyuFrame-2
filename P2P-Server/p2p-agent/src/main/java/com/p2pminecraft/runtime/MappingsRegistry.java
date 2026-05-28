@@ -62,10 +62,19 @@ public final class MappingsRegistry implements IRemapper {
 
     /**
      * Charge la classe via son nom Mojang interne.
-     * Utilise le nom obfusqué si les mappings sont chargés, sinon le nom Mojang.
+     * Tente le classloader de contexte (MC URLClassLoader, accès aux libs non obfusquées
+     * comme ResourceLocation) puis le classloader système (classes obfusquées du jar MC).
      */
     public static Class<?> loadClass(String mojanSlash) throws ClassNotFoundException {
-        return Class.forName(getObfClassDot(mojanSlash));
+        String name = getObfClassDot(mojanSlash);
+        // Classloader de contexte en premier : il a accès aux JARs de bibliothèque MC
+        // (ResourceLocation, etc.) qui ne sont pas dans le classpath système de l'agent.
+        ClassLoader ctx = Thread.currentThread().getContextClassLoader();
+        if (ctx != null) {
+            try { return Class.forName(name, false, ctx); } catch (ClassNotFoundException ignored) {}
+        }
+        // Fallback : classloader système (contient les classes obfusquées du jar MC principal)
+        return Class.forName(name);
     }
 
     /** Vérifie si obj est une instance de la classe identifiée par son nom Mojang interne. */

@@ -153,36 +153,40 @@ public class BlockSyncManager {
         return cachedBlockRegistry = c.getField(blockFieldName).get(null);
     }
 
-    static Object parseResourceLocation(String id) throws Exception {
-        Class<?> cls = MappingsRegistry.loadClass("net/minecraft/resources/ResourceLocation");
-        String parseMethod = MappingsRegistry.getObfMethodName(
-            "net/minecraft/resources/ResourceLocation", "parse");
-        try {
-            return cls.getMethod(parseMethod, String.class).invoke(null, id);
-        } catch (NoSuchMethodException e) {
-            return cls.getConstructor(String.class).newInstance(id);
-        }
-    }
+    // Cache blockId ("minecraft:stone") → BlockState par défaut, construit une seule fois
+    // en itérant le registre. Évite ResourceLocation qui n'est pas accessible par réflexion
+    // depuis l'agent (classe de bibliothèque MC dans un JAR non ajouté au classpath système).
+    private static volatile java.util.Map<String, Object> blockStateCache = null;
 
     static Object lookupBlockState(String blockId) throws Exception {
-        Object registry = blockRegistry();
-        Object rl = parseResourceLocation(blockId);
+        java.util.Map<String, Object> cache = blockStateCache;
+        if (cache == null) cache = buildBlockStateCache();
+        return cache.get(blockId);
+    }
 
-        String getMethodName = MappingsRegistry.getObfMethodName(
-            "net/minecraft/core/Registry", "get");
-        String defaultBlockStateName = MappingsRegistry.getObfMethodName(
+    private static synchronized java.util.Map<String, Object> buildBlockStateCache()
+            throws Exception {
+        if (blockStateCache != null) return blockStateCache;
+        Object registry = blockRegistry();
+        String defaultBSName = MappingsRegistry.getObfMethodName(
             "net/minecraft/world/level/block/Block", "defaultBlockState");
 
-        for (Method m : registry.getClass().getMethods()) {
-            if (!m.getName().equals(getMethodName) || m.getParameterCount() != 1) continue;
-            if (!m.getParameterTypes()[0].isInstance(rl)) continue;
-            try {
-                Object block = m.invoke(registry, rl);
-                if (block == null) continue;
-                return block.getClass().getMethod(defaultBlockStateName).invoke(block);
-            } catch (Exception ignored) {}
+        java.util.Map<String, Object> map = new java.util.HashMap<>();
+        // Registry<Block> implémente Iterable<Block> en MC 1.21.x
+        for (Object block : (Iterable<?>) registry) {
+            // Block.toString() → "Block{minecraft:vine}" (utilise BuiltInRegistries en interne)
+            String s = block.toString();
+            if (s.startsWith("Block{") && s.endsWith("}")) {
+                String id = s.substring(6, s.length() - 1);
+                try {
+                    Object state = block.getClass().getMethod(defaultBSName).invoke(block);
+                    if (state != null) map.put(id, state);
+                } catch (Exception ignored) {}
+            }
         }
-        return null;
+        blockStateCache = map;
+        System.out.println("[P2P] BlockState cache initialisé : " + map.size() + " blocs");
+        return map;
     }
 
     static void callSetBlock(Object level, Object pos, Object state, int flags) throws Exception {

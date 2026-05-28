@@ -1,4 +1,1 @@
-[13:08:49] [Server thread/INFO]: [STDOUT]: [P2P] transform: eqq$1 → eqq$1
-[13:08:49] [Server thread/INFO]: [STDOUT]: [P2P] transform: eqq$c → eqq$c
-[13:08:50] [Server thread/INFO]: [STDOUT]: [P2P] transform: eqq$d → eqq$d
-[13:08:50] [Server thread/INFO]: [STDOUT]: [P2P] transform: eqq$a → eqq$a
+mais il y a longhtemp il y a on a fait l'algorithme de snapshot et les bloc appliquer vienne de la snapshot. Est ce que ça serait pas de la que ça vient ?
