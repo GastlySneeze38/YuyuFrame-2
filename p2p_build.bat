@@ -38,6 +38,9 @@ mkdir "%OUT_ASM%"
 pushd "%OUT_ASM%"
 %JAR_CMD% xf "%LIB%\asm-9.5.jar"
 %JAR_CMD% xf "%LIB%\asm-tree-9.5.jar"
+%JAR_CMD% xf "%LIB%\asm-util-9.5.jar"
+%JAR_CMD% xf "%LIB%\asm-analysis-9.5.jar"
+%JAR_CMD% xf "%LIB%\asm-commons-9.5.jar"
 if exist module-info.class del /F module-info.class
 popd
 xcopy /E /Y /Q "%OUT_ASM%\org\" "%OUT_MAIN%\org\" >nul 2>nul
@@ -54,6 +57,9 @@ copy /Y "%JAR%" "%P2P_DIR%\p2p-agent.jar" >nul
 copy /Y "%LIB%\mixin.jar" "%P2P_DIR%\mixin.jar" >nul
 copy /Y "%LIB%\asm-9.5.jar" "%P2P_DIR%\asm-9.5.jar" >nul
 copy /Y "%LIB%\asm-tree-9.5.jar" "%P2P_DIR%\asm-tree-9.5.jar" >nul
+copy /Y "%LIB%\asm-util-9.5.jar" "%P2P_DIR%\asm-util-9.5.jar" >nul
+copy /Y "%LIB%\asm-analysis-9.5.jar" "%P2P_DIR%\asm-analysis-9.5.jar" >nul
+copy /Y "%LIB%\asm-commons-9.5.jar" "%P2P_DIR%\asm-commons-9.5.jar" >nul
 echo Deploye dans %P2P_DIR%
 echo.
 echo === BUILD REUSSI ===

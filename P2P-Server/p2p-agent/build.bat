@@ -21,7 +21,7 @@ if not exist "%LIB%\mixin.jar" (
     if errorlevel 1 (echo ERREUR: téléchargement Mixin & exit /b 1)
 )
 
-:: Télécharger ASM si absent (base + tree)
+:: Télécharger ASM si absent (base + tree + util + analysis)
 if not exist "%LIB%\asm-9.5.jar" (
     echo Téléchargement ASM 9.5...
     powershell -Command "Invoke-WebRequest -Uri 'https://repo1.maven.org/maven2/org/ow2/asm/asm/9.5/asm-9.5.jar' -OutFile '%LIB%\asm-9.5.jar' -UseBasicParsing"
@@ -31,6 +31,21 @@ if not exist "%LIB%\asm-tree-9.5.jar" (
     echo Téléchargement ASM-Tree 9.5...
     powershell -Command "Invoke-WebRequest -Uri 'https://repo1.maven.org/maven2/org/ow2/asm/asm-tree/9.5/asm-tree-9.5.jar' -OutFile '%LIB%\asm-tree-9.5.jar' -UseBasicParsing"
     if errorlevel 1 (echo ERREUR: téléchargement ASM-Tree & exit /b 1)
+)
+if not exist "%LIB%\asm-util-9.5.jar" (
+    echo Téléchargement ASM-Util 9.5...
+    powershell -Command "Invoke-WebRequest -Uri 'https://repo1.maven.org/maven2/org/ow2/asm/asm-util/9.5/asm-util-9.5.jar' -OutFile '%LIB%\asm-util-9.5.jar' -UseBasicParsing"
+    if errorlevel 1 (echo ERREUR: téléchargement ASM-Util & exit /b 1)
+)
+if not exist "%LIB%\asm-analysis-9.5.jar" (
+    echo Téléchargement ASM-Analysis 9.5...
+    powershell -Command "Invoke-WebRequest -Uri 'https://repo1.maven.org/maven2/org/ow2/asm/asm-analysis/9.5/asm-analysis-9.5.jar' -OutFile '%LIB%\asm-analysis-9.5.jar' -UseBasicParsing"
+    if errorlevel 1 (echo ERREUR: téléchargement ASM-Analysis & exit /b 1)
+)
+if not exist "%LIB%\asm-commons-9.5.jar" (
+    echo Téléchargement ASM-Commons 9.5...
+    powershell -Command "Invoke-WebRequest -Uri 'https://repo1.maven.org/maven2/org/ow2/asm/asm-commons/9.5/asm-commons-9.5.jar' -OutFile '%LIB%\asm-commons-9.5.jar' -UseBasicParsing"
+    if errorlevel 1 (echo ERREUR: téléchargement ASM-Commons & exit /b 1)
 )
 
 :: Compiler les stubs MC (compile-only, non inclus dans le JAR final)
@@ -69,6 +84,9 @@ mkdir "%OUT_ASM%"
 pushd "%OUT_ASM%"
 %JAR_CMD% xf "%LIB%\asm-9.5.jar"
 %JAR_CMD% xf "%LIB%\asm-tree-9.5.jar"
+%JAR_CMD% xf "%LIB%\asm-util-9.5.jar"
+%JAR_CMD% xf "%LIB%\asm-analysis-9.5.jar"
+%JAR_CMD% xf "%LIB%\asm-commons-9.5.jar"
 if exist module-info.class del /F module-info.class
 popd
 :: Copier les classes org/objectweb/ dans build/main
@@ -89,6 +107,9 @@ copy /Y "%JAR%" "%P2P_DIR%\p2p-agent.jar" >nul
 copy /Y "%LIB%\mixin.jar" "%P2P_DIR%\mixin.jar" >nul
 copy /Y "%LIB%\asm-9.5.jar" "%P2P_DIR%\asm-9.5.jar" >nul
 copy /Y "%LIB%\asm-tree-9.5.jar" "%P2P_DIR%\asm-tree-9.5.jar" >nul
+copy /Y "%LIB%\asm-util-9.5.jar" "%P2P_DIR%\asm-util-9.5.jar" >nul
+copy /Y "%LIB%\asm-analysis-9.5.jar" "%P2P_DIR%\asm-analysis-9.5.jar" >nul
+copy /Y "%LIB%\asm-commons-9.5.jar" "%P2P_DIR%\asm-commons-9.5.jar" >nul
 echo Déployé dans %P2P_DIR%
 
 echo.
