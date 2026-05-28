@@ -100,6 +100,11 @@ export const api = {
     get: () => invoke<StatsData>('stats_get'),
   },
 
+  p2p: {
+    start: () => invoke<string>('p2p_start'),
+    join: (peerId: string) => invoke<void>('p2p_join', { peerId }),
+  },
+
   mods: {
     list: (instanceId: string) => invoke<Mod[]>('mods_list', { instanceId }),
     toggle: (instanceId: string, name: string) =>
