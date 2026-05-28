@@ -78,8 +78,10 @@ public class SnapshotManager {
         P2PNetwork net = RuntimeInitializer.getNetwork();
         if (net == null) return;
 
-        int cx = DistributedChunkManager.getMyChunkX();
-        int cz = DistributedChunkManager.getMyChunkZ();
+        // Lire la vraie position du joueur depuis le ServerLevel (pas le 0,0 par défaut)
+        int[] pos = getPlayerChunkPos(level);
+        int cx = pos[0], cz = pos[1];
+        DistributedChunkManager.setMyPosition(cx, cz);
 
         System.out.println("[P2P] Snapshot → " + peerId.substring(0, 8)
             + "  centre=" + cx + "," + cz + "  rayon=" + RADIUS);
@@ -296,5 +298,43 @@ public class SnapshotManager {
             return "minecraft:air".equals(id) || "minecraft:void_air".equals(id)
                 || "minecraft:cave_air".equals(id);
         }
+    }
+
+    /** Retourne [chunkX, chunkZ] du premier joueur présent dans le level, ou [0,0] si absent. */
+    private static int[] getPlayerChunkPos(Object level) {
+        try {
+            String playersName = MappingsRegistry.getObfMethodName(
+                "net/minecraft/world/level/Level", "players");
+            for (Method m : level.getClass().getMethods()) {
+                if (!m.getName().equals(playersName) || m.getParameterCount() != 0) continue;
+                Object result = m.invoke(level);
+                if (!(result instanceof java.util.List<?> players) || players.isEmpty()) break;
+                Object player = players.get(0);
+                int bx = getEntityBlockCoord(player, "getBlockX");
+                int bz = getEntityBlockCoord(player, "getBlockZ");
+                return new int[]{bx >> 4, bz >> 4};
+            }
+        } catch (Exception e) {
+            System.err.println("[P2P] getPlayerChunkPos: " + e.getMessage());
+        }
+        return new int[]{DistributedChunkManager.getMyChunkX(), DistributedChunkManager.getMyChunkZ()};
+    }
+
+    private static int getEntityBlockCoord(Object entity, String mojanMethod) {
+        String obf = MappingsRegistry.getObfMethodName(
+            "net/minecraft/world/entity/Entity", mojanMethod);
+        Class<?> cls = entity.getClass();
+        while (cls != null && cls != Object.class) {
+            try {
+                Method m = cls.getDeclaredMethod(obf);
+                m.setAccessible(true);
+                return (int) m.invoke(entity);
+            } catch (NoSuchMethodException ignored) {
+                cls = cls.getSuperclass();
+            } catch (Exception e) {
+                break;
+            }
+        }
+        return 0;
     }
 }

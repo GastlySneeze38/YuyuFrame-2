@@ -25,6 +25,7 @@ public abstract class ServerLevelMixin {
         // est la méthode de tick serveur la plus simple déjà hookée.
         com.p2pminecraft.runtime.BlockSyncManager.registerLevel((Object) this);
         com.p2pminecraft.runtime.BlockSyncManager.flushPendingChanges();
+        com.p2pminecraft.runtime.SnapshotManager.flush();
         try {
             java.nio.file.Path f = java.nio.file.Paths.get(
                 System.getenv("APPDATA"), "YuyuFrame\\p2p\\Log\\p2p_hook.txt");
