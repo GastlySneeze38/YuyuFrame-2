@@ -17,7 +17,8 @@ public abstract class ServerLevelMixin {
      * ATTENTION : tickChunks() -> u appartient à ServerChunkCache, PAS ServerLevel.
      * Le mixin précédent ciblait la mauvaise classe → injection silencieusement ignorée.
      */
-    @Inject(method = "tickTime()V", at = @At("HEAD"))
+    // tickTime() → d()V en obfusqué dans axf (client-mappings-1.21.11 ligne ~73922)
+    @Inject(method = "d()V", at = @At("HEAD"))
     private void p2p$tickTimeHead(CallbackInfo ci) {
         System.out.println("[P2P HOOK] tickTime fired!");
         try {
