@@ -36,6 +36,13 @@ public class P2PMixinService implements IMixinService, IClassProvider, IClassByt
     @Override public void beginPhase() {}
     @Override
     public void offer(IMixinInternal internal) {
+        System.out.println("[P2P] offer() reçu : " + internal.getClass().getName());
+        for (Class<?> iface : internal.getClass().getInterfaces()) {
+            System.out.println("[P2P]   iface: " + iface.getName() + " (CL: " + iface.getClassLoader() + ")");
+        }
+        System.out.println("[P2P]   IMixinTransformerFactory CL: " + IMixinTransformerFactory.class.getClassLoader());
+        System.out.println("[P2P]   instanceof check: " + (internal instanceof IMixinTransformerFactory));
+
         if (internal instanceof IMixinTransformerFactory) {
             try {
                 IMixinTransformer transformer = ((IMixinTransformerFactory) internal).createTransformer();
