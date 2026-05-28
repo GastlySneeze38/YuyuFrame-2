@@ -5,8 +5,11 @@ import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.launch.platform.container.IContainerHandle;
 import org.spongepowered.asm.logging.ILogger;
 import org.spongepowered.asm.mixin.MixinEnvironment;
+import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
+import org.spongepowered.asm.mixin.transformer.IMixinTransformerFactory;
 import org.spongepowered.asm.service.*;
 import org.spongepowered.asm.util.ReEntranceLock;
+import org.spongepowered.tools.agent.MixinAgent;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,7 +34,19 @@ public class P2PMixinService implements IMixinService, IClassProvider, IClassByt
     @Override public void prepare()    {}
     @Override public void init()       {}
     @Override public void beginPhase() {}
-    @Override public void offer(IMixinInternal internal) {}
+    @Override
+    public void offer(IMixinInternal internal) {
+        if (internal instanceof IMixinTransformerFactory) {
+            try {
+                IMixinTransformer transformer = ((IMixinTransformerFactory) internal).createTransformer();
+                new MixinAgent(transformer);
+                System.out.println("[P2P] MixinAgent installé — ClassFileTransformer actif");
+            } catch (Exception e) {
+                System.err.println("[P2P] Erreur installation MixinAgent: " + e.getMessage());
+                e.printStackTrace(System.err);
+            }
+        }
+    }
     @Override public void checkEnv(Object bootSource)    {}
 
     @Override

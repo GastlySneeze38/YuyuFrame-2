@@ -5,6 +5,7 @@ import com.p2pminecraft.runtime.RuntimeInitializer;
 import org.spongepowered.asm.launch.MixinBootstrap;
 import org.spongepowered.asm.mixin.MixinEnvironment;
 import org.spongepowered.asm.mixin.Mixins;
+import org.spongepowered.asm.mixin.extensibility.IMixinConfigSource;
 
 import java.lang.instrument.Instrumentation;
 
@@ -50,7 +51,9 @@ public class P2PAgent {
                 System.out.println("[P2P Agent] Remappeur Mojang → obfusqué enregistré dans Mixin");
             }
 
-            Mixins.addConfiguration("mixins.p2p.json");
+            // addConfiguration(String,IMixinConfigSource) passe getDefaultEnvironment() (non-null)
+            // contrairement à addConfiguration(String) qui passe null → NPE dans MixinConfig.onLoad()
+            Mixins.addConfiguration("mixins.p2p.json", (IMixinConfigSource) null);
             System.out.println("[P2P Agent] Mixin initialisé — LevelChunkMixin enregistré");
         } catch (Exception e) {
             System.err.println("[P2P Agent] ERREUR Mixin bootstrap : " + e.getMessage());
