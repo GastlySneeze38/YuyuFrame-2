@@ -57,7 +57,8 @@ echo Compilation stubs Minecraft...
   "%SRC_STUBS%\net\minecraft\world\level\ChunkPos.java" ^
   "%SRC_STUBS%\net\minecraft\core\BlockPos.java" ^
   "%SRC_STUBS%\net\minecraft\world\level\block\state\BlockState.java" ^
-  "%SRC_STUBS%\net\minecraft\world\level\chunk\LevelChunk.java"
+  "%SRC_STUBS%\net\minecraft\world\level\chunk\LevelChunk.java" ^
+  "%SRC_STUBS%\net\minecraft\server\level\ServerLevel.java"
 if errorlevel 1 (echo ERREUR: compilation stubs & exit /b 1)
 
 :: Compiler le code principal

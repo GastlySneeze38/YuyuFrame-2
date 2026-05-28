@@ -24,10 +24,14 @@ import java.util.Collections;
  */
 public class P2PMixinService implements IMixinService, IClassProvider, IClassBytecodeProvider {
 
-    private static Instrumentation savedInst;
+    private static volatile Instrumentation savedInst;
+    // Transformer créé dans offer() — conservé pour installation différée si savedInst était null
+    private static volatile IMixinTransformer storedTransformer;
 
     public static void setInstrumentation(Instrumentation inst) {
         savedInst = inst;
+        // Pas d'installation automatique ici : les mappings ne sont pas encore chargés.
+        // P2PAgent.premain() appellera installWrapper() explicitement après setup complet.
     }
 
     private final ReEntranceLock lock = new ReEntranceLock(1);
@@ -45,23 +49,35 @@ public class P2PMixinService implements IMixinService, IClassProvider, IClassByt
     public void offer(IMixinInternal internal) {
         if (!(internal instanceof IMixinTransformerFactory)) return;
         try {
-            IMixinTransformer transformer = ((IMixinTransformerFactory) internal).createTransformer();
-            if (savedInst != null) {
-                savedInst.addTransformer(new P2PMixinTransformerWrapper(transformer), true);
-                System.out.println("[P2P] ClassFileTransformer Mixin installé via instrumentation P2P");
-            } else {
-                System.err.println("[P2P] WARN: savedInst null — transformer non installé");
-            }
+            storedTransformer = ((IMixinTransformerFactory) internal).createTransformer();
+            // Pas d'installation ici : mappings pas encore chargés → unmap() retournerait le
+            // nom obfusqué tel quel au lieu du nom Mojang → Mixin ne reconnaîtrait pas la cible.
+            System.out.println("[P2P] offer() : transformer stocké, wrapper installé plus tard");
         } catch (Exception e) {
             System.err.println("[P2P] Erreur offer(): " + e.getMessage());
             e.printStackTrace(System.err);
+        }
+    }
+
+    /** Appelé explicitement par P2PAgent.premain() APRÈS chargement mappings + addConfiguration(). */
+    public static void installWrapper() {
+        if (savedInst == null) { System.err.println("[P2P] installWrapper: savedInst null"); return; }
+        if (storedTransformer == null) { System.err.println("[P2P] installWrapper: storedTransformer null"); return; }
+        try {
+            savedInst.addTransformer(new P2PMixinTransformerWrapper(storedTransformer), true);
+            System.out.println("[P2P] Wrapper installé (mappings+config prêts, canRetransform=true)");
+        } catch (Exception e) {
+            System.err.println("[P2P] installWrapper() erreur: " + e);
         }
     }
     @Override public void checkEnv(Object bootSource)    {}
 
     @Override
     public MixinEnvironment.Phase getInitialPhase() {
-        return MixinEnvironment.Phase.PREINIT;
+        // DEFAULT : nos mixins sont dans le tableau "mixins" de mixins.p2p.json (phase DEFAULT).
+        // Avec PREINIT, ils étaient préparés (parsés) mais jamais appliqués — la phase DEFAULT
+        // n'arrivait jamais dans notre setup standalone sans launcher.
+        return MixinEnvironment.Phase.DEFAULT;
     }
 
     @Override public ReEntranceLock getReEntranceLock()     { return lock; }
@@ -84,8 +100,16 @@ public class P2PMixinService implements IMixinService, IClassProvider, IClassByt
 
     @Override
     public InputStream getResourceAsStream(String name) {
+        // Essayer d'abord le context classloader (MC), puis l'agent classloader pour les
+        // ressources embarquées dans notre JAR (mixins.p2p.json, services SPI, etc.)
         ClassLoader cl = getContextClassLoader();
-        return cl.getResourceAsStream(name);
+        InputStream is = cl.getResourceAsStream(name);
+        if (is == null) {
+            cl = P2PMixinService.class.getClassLoader();
+            is = cl.getResourceAsStream(name);
+        }
+        writeNodeDebug("getResourceAsStream: " + name + " found=" + (is != null) + "\n");
+        return is;
     }
 
     @Override public String getSideName() { return "CLIENT"; }
@@ -135,14 +159,62 @@ public class P2PMixinService implements IMixinService, IClassProvider, IClassByt
     @Override
     public ClassNode getClassNode(String name, boolean runTransformers, int readerFlags)
             throws ClassNotFoundException, IOException {
-        String resource = name.replace('.', '/') + ".class";
-        try (InputStream is = getContextClassLoader().getResourceAsStream(resource)) {
-            if (is == null) throw new ClassNotFoundException(name);
+        // Mixin passe le nom en format "a.b.C" ou "a/b/C" selon le contexte
+        String nameSlash = name.replace('.', '/');
+        String resource = nameSlash + ".class";
+
+        // 1. Chercher directement (nos propres classes, classes JDK, classes déjà non-obf)
+        ClassLoader cl = getContextClassLoader();
+        InputStream is = cl.getResourceAsStream(resource);
+        if (is == null) {
+            cl = P2PMixinService.class.getClassLoader();
+            is = cl.getResourceAsStream(resource);
+        }
+
+        // 2. Pas trouvé → c'est probablement un nom Mojang (net/minecraft/...).
+        //    Convertir via MappingsRegistry vers le nom obfusqué pour charger depuis le JAR MC.
+        String obfSlash = nameSlash;
+        if (is == null && com.p2pminecraft.runtime.MappingsRegistry.isLoaded()) {
+            obfSlash = com.p2pminecraft.runtime.MappingsRegistry.INSTANCE.map(nameSlash);
+            if (!obfSlash.equals(nameSlash)) {
+                String obfResource = obfSlash + ".class";
+                cl = getContextClassLoader();
+                is = cl.getResourceAsStream(obfResource);
+                if (is == null) {
+                    cl = P2PMixinService.class.getClassLoader();
+                    is = cl.getResourceAsStream(obfResource);
+                }
+            }
+        }
+
+        writeNodeDebug("getClassNode: " + nameSlash + " found=" + (is != null)
+                + (obfSlash.equals(nameSlash) ? "" : " (obf=" + obfSlash + ")") + "\n");
+        if (is == null) throw new ClassNotFoundException(name);
+
+        try {
             ClassReader cr = new ClassReader(is);
             ClassNode cn = new ClassNode();
             cr.accept(cn, readerFlags == 0 ? ClassReader.EXPAND_FRAMES : readerFlags);
+            // Si on a chargé la classe obfusquée pour répondre à une demande de nom Mojang,
+            // corriger cn.name pour qu'il corresponde à ce que Mixin attend.
+            if (!obfSlash.equals(nameSlash)) {
+                cn.name = nameSlash;
+            }
             return cn;
+        } finally {
+            is.close();
         }
+    }
+
+    private static void writeNodeDebug(String msg) {
+        try {
+            java.nio.file.Path f = java.nio.file.Paths.get(
+                System.getenv("APPDATA"), "YuyuFrame\\p2p\\Log\\p2p_agent.txt");
+            java.nio.file.Files.createDirectories(f.getParent());
+            java.nio.file.Files.write(f, msg.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception ignored) {}
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

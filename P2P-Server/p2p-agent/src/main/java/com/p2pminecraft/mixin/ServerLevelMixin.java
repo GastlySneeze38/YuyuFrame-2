@@ -10,15 +10,24 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class ServerLevelMixin {
 
     /**
-     * Pas de paramètre LevelChunk dans la signature du handler pour éviter
-     * tout problème de remapping de type (LevelChunk → eqq) dans le bytecode.
-     * Diagnostic : confirme que tickChunk est bien intercepté.
+     * tickTime() → d() en obfusqué, pas d'argument = pas de remapping de type.
+     * Appelée à chaque tick serveur (avance le temps jour/nuit).
+     * Cible confirmée dans client-mappings-1.21.11 : ServerLevel.tickTime() -> d
+     *
+     * ATTENTION : tickChunks() -> u appartient à ServerChunkCache, PAS ServerLevel.
+     * Le mixin précédent ciblait la mauvaise classe → injection silencieusement ignorée.
      */
-    @Inject(
-        method = "tickChunk(Lnet/minecraft/world/level/chunk/LevelChunk;I)V",
-        at = @At("RETURN")
-    )
-    private void p2p$tickChunkReturn(CallbackInfo ci) {
-        System.out.println("[P2P HOOK] tickChunk fired!");
+    @Inject(method = "tickTime()V", at = @At("HEAD"))
+    private void p2p$tickTimeHead(CallbackInfo ci) {
+        System.out.println("[P2P HOOK] tickTime fired!");
+        try {
+            java.nio.file.Path f = java.nio.file.Paths.get(
+                System.getenv("APPDATA"), "YuyuFrame\\p2p\\Log\\p2p_hook.txt");
+            java.nio.file.Files.createDirectories(f.getParent());
+            java.nio.file.Files.write(f,
+                ("tickTime fired at " + System.currentTimeMillis() + "\n").getBytes(),
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception ignored) {}
     }
 }

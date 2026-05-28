@@ -6,5 +6,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
 /** Stub compile-only — la vraie classe vient du JAR Minecraft mappé. */
 public abstract class ServerLevel extends Level {
     protected ServerLevel() {}
+    public void tickTime() {}
     public void tickChunk(LevelChunk chunk, int randomTickSpeed) {}
 }
