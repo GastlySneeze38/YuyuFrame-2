@@ -87,6 +87,8 @@ set P2P_DIR=%APPDATA%\YuyuFrame\p2p
 if not exist "%P2P_DIR%" mkdir "%P2P_DIR%"
 copy /Y "%JAR%" "%P2P_DIR%\p2p-agent.jar" >nul
 copy /Y "%LIB%\mixin.jar" "%P2P_DIR%\mixin.jar" >nul
+copy /Y "%LIB%\asm-9.5.jar" "%P2P_DIR%\asm-9.5.jar" >nul
+copy /Y "%LIB%\asm-tree-9.5.jar" "%P2P_DIR%\asm-tree-9.5.jar" >nul
 echo Déployé dans %P2P_DIR%
 
 echo.

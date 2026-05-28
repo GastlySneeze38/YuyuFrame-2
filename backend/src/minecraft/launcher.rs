@@ -269,7 +269,7 @@ pub async fn download_and_launch(
     // Démarre le signaling, télécharge les mappings Mojang et prépare les javaagents.
     // Le JAR original Minecraft est utilisé directement — le remapping est assuré à
     // l'exécution par MappingsRegistry (IRemapper Mixin) et les appels de réflexion.
-    let (effective_client_jar, p2p_jvm_args) = if p2p {
+    let (effective_client_jar, p2p_jvm_args, p2p_extra_cp) = if p2p {
         p2p::start_signaling(app.clone());
 
         // Copier rust_core.dll dans natives_dir pour que -Djava.library.path le trouve
@@ -284,8 +284,10 @@ pub async fn download_and_launch(
         // Télécharger les mappings Mojang (quelques Ko, rapide)
         let mappings_path = p2p::ensure_mappings(version_id, &client, &app).await?;
 
-        let mixin_jar = p2p::p2p_dir().join("mixin.jar");
-        let agent_jar = p2p::p2p_dir().join("p2p-agent.jar");
+        let mixin_jar     = p2p::p2p_dir().join("mixin.jar");
+        let agent_jar     = p2p::p2p_dir().join("p2p-agent.jar");
+        let asm_jar       = p2p::p2p_dir().join("asm-9.5.jar");
+        let asm_tree_jar  = p2p::p2p_dir().join("asm-tree-9.5.jar");
 
         if !mixin_jar.exists() {
             return Err(anyhow!(
@@ -298,6 +300,19 @@ pub async fn download_and_launch(
                 "p2p-agent.jar manquant dans {}\n  Compiler P2P-Server/p2p-agent/ et copier le JAR vers ce dossier",
                 p2p::p2p_dir().display()
             ));
+        }
+
+        // MixinAgent (dans mixin.jar) déclare registerTargetClass(String, ClassNode).
+        // Le JVM résout toutes les signatures déclarées au chargement de la classe, donc
+        // org.objectweb.asm.tree.ClassNode doit être sur le classpath AVANT que mixin.jar
+        // soit traité comme javaagent. On ajoute asm-9.5.jar et asm-tree-9.5.jar au -cp.
+        let mut extra_cp: Vec<String> = Vec::new();
+        for jar in [&asm_jar, &asm_tree_jar] {
+            if jar.exists() {
+                extra_cp.push(jar.to_string_lossy().to_string());
+            } else {
+                tracing::warn!("[P2P] {} manquant — peut causer NoClassDefFoundError au démarrage", jar.display());
+            }
         }
 
         let peer_id = uuid::Uuid::new_v4().to_string();
@@ -313,10 +328,9 @@ pub async fn download_and_launch(
         log_to_console(&app, &console_label, &format!("[P2P] Mixin    : {}", mixin_arg), "out");
         log_to_console(&app, &console_label, &format!("[P2P] Agent    : {}", agent_arg), "out");
         log_to_console(&app, &console_label, &format!("[P2P] Mappings : {}", mappings_path.display()), "out");
-        // JAR original (obfusqué) — le remapping est géré à l'exécution par MappingsRegistry
-        (client_jar.clone(), vec![mixin_arg, agent_arg])
+        (client_jar.clone(), vec![mixin_arg, agent_arg], extra_cp)
     } else {
-        (client_jar.clone(), vec![])
+        (client_jar.clone(), vec![], vec![])
     };
 
     // ── Attente des assets ────────────────────────────────────────────────────
@@ -330,6 +344,7 @@ pub async fn download_and_launch(
     let classpath_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
 
     let mut full_classpath: Vec<String> = extra_classpath;
+    full_classpath.extend(p2p_extra_cp); // asm-9.5.jar + asm-tree-9.5.jar avant tout le reste
     full_classpath.extend(classpath);
     full_classpath.push(effective_client_jar.to_string_lossy().to_string());
     let classpath_str = dedup_classpath(full_classpath).join(classpath_sep);
