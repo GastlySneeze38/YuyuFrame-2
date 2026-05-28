@@ -31,6 +31,8 @@ public class P2PNetwork {
     private final String signalingUrl;
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile DataReceiver dataReceiver;
+    // HttpClient kept as field — local variable would be GC'd, closing the WebSocket
+    private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "p2p-network");
         t.setDaemon(true);
@@ -49,8 +51,7 @@ public class P2PNetwork {
 
     private void connect() {
         try {
-            HttpClient client = HttpClient.newHttpClient();
-            ws = client.newWebSocketBuilder()
+            ws = httpClient.newWebSocketBuilder()
                 .buildAsync(URI.create(signalingUrl), new Listener())
                 .get(10, TimeUnit.SECONDS);
 

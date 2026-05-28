@@ -141,6 +141,12 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                         }).unwrap();
                         send_all(&peers, &id, &joined);
 
+                        // Informe les machines distantes qu'un pair a rejoint
+                        if let Some(handle) = P2PLibp2pHandle::get_global() {
+                            let fwd = raw.clone();
+                            tokio::spawn(async move { let _ = handle.send_json(fwd).await; });
+                        }
+
                         tracing::info!("[P2P Signaling] + {} ({}...)", name, &id[..8.min(id.len())]);
                     }
                     Ok(Msg::Position { id, x, z }) => {
@@ -148,6 +154,11 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                             p.x = x; p.z = z;
                         }
                         send_all(&peers, &id, &raw);
+                        // Propage la position aux machines distantes
+                        if let Some(handle) = P2PLibp2pHandle::get_global() {
+                            let fwd = raw.clone();
+                            tokio::spawn(async move { let _ = handle.send_json(fwd).await; });
+                        }
                     }
                     Ok(Msg::Data { ref from, ref to, ref payload }) => {
                         let out = serde_json::to_string(&Msg::Data {
@@ -157,15 +168,28 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                         }).unwrap();
                         match to {
                             Some(target) => {
-                                // Unicast vers le pair ciblé
-                                if let Some(peer) = peers.lock().unwrap().get(target.as_str()) {
-                                    peer.tx.send(out).ok();
+                                // Unicast : local d'abord, puis libp2p si pair absent localement
+                                let delivered_locally = {
+                                    let map = peers.lock().unwrap();
+                                    if let Some(peer) = map.get(target.as_str()) {
+                                        peer.tx.send(out.clone()).ok();
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if !delivered_locally {
+                                    if let Some(handle) = P2PLibp2pHandle::get_global() {
+                                        let out2 = out;
+                                        tokio::spawn(async move {
+                                            let _ = handle.send_json(out2).await;
+                                        });
+                                    }
                                 }
                             }
                             None => {
-                                // Broadcast local
+                                // Broadcast local + inter-machine via libp2p
                                 send_all(&peers, from, &out);
-                                // Broadcast inter-machine via libp2p
                                 if let Some(handle) = P2PLibp2pHandle::get_global() {
                                     let out2 = out.clone();
                                     tokio::spawn(async move {
@@ -193,6 +217,11 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
             .remove(&id).map(|p| p.name).unwrap_or_default();
         let left = serde_json::to_string(&Msg::PeerLeft { id: id.clone() }).unwrap();
         send_all(&peers, &id, &left);
+        // Informe les machines distantes que le pair est parti
+        if let Some(handle) = P2PLibp2pHandle::get_global() {
+            let fwd = left.clone();
+            tokio::spawn(async move { let _ = handle.send_json(fwd).await; });
+        }
         tracing::info!("[P2P Signaling] - {} déconnecté", name);
     }
 }
