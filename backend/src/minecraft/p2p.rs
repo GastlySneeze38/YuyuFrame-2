@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tungstenite::{accept, Message};
 
+use crate::minecraft::p2p_libp2p::{BridgeEvent, P2PLibp2pHandle};
+
 pub const SIGNALING_PORT: u16 = 8765;
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
@@ -58,11 +60,16 @@ struct PeerHandle {
 type PeerMap = Arc<Mutex<HashMap<String, PeerHandle>>>;
 
 static SIGNALING_STARTED: OnceLock<()> = OnceLock::new();
+static PEERS_GLOBAL: OnceLock<PeerMap> = OnceLock::new();
+
+fn peers_global() -> &'static PeerMap {
+    PEERS_GLOBAL.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
 
 /// Démarre le signaling WebSocket en arrière-plan (idempotent).
 pub fn start_signaling(app: tauri::AppHandle) {
     SIGNALING_STARTED.get_or_init(|| {
-        let peers: PeerMap = Arc::new(Mutex::new(HashMap::new()));
+        let peers: PeerMap = peers_global().clone();
         let pm = peers.clone();
         thread::spawn(move || {
             let listener = match TcpListener::bind(("127.0.0.1", SIGNALING_PORT)) {
@@ -156,8 +163,15 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
                                 }
                             }
                             None => {
-                                // Broadcast à tous sauf l'émetteur
+                                // Broadcast local
                                 send_all(&peers, from, &out);
+                                // Broadcast inter-machine via libp2p
+                                if let Some(handle) = P2PLibp2pHandle::get_global() {
+                                    let out2 = out.clone();
+                                    tokio::spawn(async move {
+                                        let _ = handle.send_json(out2).await;
+                                    });
+                                }
                             }
                         }
                     }
@@ -181,6 +195,69 @@ fn handle_peer(stream: TcpStream, peers: PeerMap) {
         send_all(&peers, &id, &left);
         tracing::info!("[P2P Signaling] - {} déconnecté", name);
     }
+}
+
+// ── Libp2p — démarrage et bridge ─────────────────────────────────────────────
+
+/// Démarre le nœud libp2p et retourne le code de session (PeerID base58).
+pub async fn start_libp2p() -> Result<String> {
+    if let Some(handle) = P2PLibp2pHandle::get_global() {
+        return Ok(handle.session_code());
+    }
+
+    let (handle, mut bridge_rx) = P2PLibp2pHandle::start().await?;
+    let code = handle.session_code();
+    P2PLibp2pHandle::set_global(handle);
+
+    // Bridge task : messages libp2p → clients WebSocket locaux
+    tokio::spawn(async move {
+        while let Some(event) = bridge_rx.recv().await {
+            let peers = peers_global();
+            match event {
+                BridgeEvent::Message(json) => {
+                    // Transformer join → peer_joined pour les clients locaux
+                    let injected = transform_for_local_clients(&json);
+                    let map = peers.lock().unwrap();
+                    for peer in map.values() {
+                        peer.tx.send(injected.clone()).ok();
+                    }
+                }
+                BridgeEvent::PeerLeft(peer_id) => {
+                    let left = serde_json::to_string(&Msg::PeerLeft { id: peer_id }).unwrap();
+                    let map = peers.lock().unwrap();
+                    for peer in map.values() {
+                        peer.tx.send(left.clone()).ok();
+                    }
+                }
+            }
+        }
+    });
+
+    tracing::info!("[P2P libp2p] Démarré — code: {}", &code[..12]);
+    Ok(code)
+}
+
+/// Connecte au pair distant via son code de session (PeerID base58).
+pub async fn join_libp2p(peer_id: String) -> Result<()> {
+    let handle = P2PLibp2pHandle::get_global()
+        .ok_or_else(|| anyhow!("libp2p non démarré — appelez p2p_start d'abord"))?;
+    handle.connect_to(peer_id).await
+}
+
+/// Transforme un message reçu du pair distant pour l'injecter dans les clients locaux.
+/// Principalement : join {id, name} → peer_joined {id, name, x:0, z:0}
+fn transform_for_local_clients(json: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+        if v["type"] == "join" {
+            return serde_json::to_string(&serde_json::json!({
+                "type": "peer_joined",
+                "id":   v["id"],
+                "name": v["name"],
+                "x": 0, "z": 0
+            })).unwrap_or_else(|_| json.to_string());
+        }
+    }
+    json.to_string()
 }
 
 // ── Mappings Mojang ───────────────────────────────────────────────────────────
