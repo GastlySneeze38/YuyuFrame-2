@@ -50,14 +50,23 @@ public class P2PMixinTransformerWrapper implements ClassFileTransformer {
 
         byte[] result = transformer.transformClassBytes(obfDot, mojangDot, classfileBuffer);
 
-        // Pour iqa : si Mixin n'a pas pu injecter p2p$preventPause (car retransformClasses
-        // refuse d'ajouter de nouvelles méthodes), on applique un patch ASM direct qui
-        // modifie uniquement b(Z)V — sans ajouter de méthode.
+        // iqa (IntegratedServer) : patch b(Z)V + a(BooleanSupplier) pour empêcher la pause serveur
         if ("iqa".equals(className)) {
             byte[] src = (result != null) ? result : classfileBuffer;
             if (!hasPauseGuard(src)) {
-                System.out.println("[P2P ASM] Patch direct iqa.b(Z)V (fallback Mixin)");
+                System.out.println("[P2P ASM] Patch direct iqa (b+a)");
                 byte[] patched = patchProcessPacketsAndTick(src);
+                if (patched != null) return patched;
+            }
+        }
+
+        // gfj (Minecraft) : patch an()Z (isPaused) → toujours false
+        // Permet au client de continuer à ticker (interpolation entités) quand le menu est ouvert.
+        if ("gfj".equals(className)) {
+            byte[] src = (result != null) ? result : classfileBuffer;
+            if (!asmPatched.contains("gfj")) {
+                System.out.println("[P2P ASM] Patch gfj.an()Z (isPaused → false)");
+                byte[] patched = patchMinecraftIsPaused(src);
                 if (patched != null) return patched;
             }
         }
@@ -186,7 +195,90 @@ public class P2PMixinTransformerWrapper implements ClassFileTransformer {
             System.err.println("[P2P ASM] WARN: b(Z)V non trouvée dans iqa");
             return null;
         } catch (Exception e) {
-            System.err.println("[P2P ASM] Erreur patch: " + e);
+            System.err.println("[P2P ASM] Erreur patch iqa: " + e);
+            return null;
+        }
+    }
+
+    /**
+     * Patch gfj.an()Z (Minecraft.isPaused()) pour toujours retourner false.
+     * Le corps original est remplacé par ICONST_0 + IRETURN.
+     * Aucune nouvelle méthode ajoutée → compatible retransformClasses.
+     *
+     * Effet : le client continue de ticker (interpolation entités, réception paquets)
+     * même quand le menu de pause est ouvert.
+     */
+    private static byte[] patchMinecraftIsPaused(byte[] classBytes) {
+        try {
+            ClassReader cr = new ClassReader(classBytes);
+            ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES) {
+                @Override
+                protected String getCommonSuperClass(String t1, String t2) {
+                    try {
+                        ClassLoader cl = Thread.currentThread().getContextClassLoader();
+                        Class<?> c1 = Class.forName(t1.replace('/', '.'), false, cl);
+                        Class<?> c2 = Class.forName(t2.replace('/', '.'), false, cl);
+                        if (c1.isAssignableFrom(c2)) return t1;
+                        if (c2.isAssignableFrom(c1)) return t2;
+                        if (c1.isInterface() || c2.isInterface()) return "java/lang/Object";
+                        do { c1 = c1.getSuperclass(); } while (!c1.isAssignableFrom(c2));
+                        return c1.getName().replace('.', '/');
+                    } catch (Exception e) {
+                        return "java/lang/Object";
+                    }
+                }
+            };
+
+            boolean[] patched = {false};
+            cr.accept(new ClassVisitor(Opcodes.ASM9, cw) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                String signature, String[] exceptions) {
+                    // an()Z = isPaused() → remplacer le corps par "return false"
+                    if ("an".equals(name) && "()Z".equals(descriptor)) {
+                        System.out.println("[P2P ASM] Remplacement gfj.an()Z → return false");
+                        patched[0] = true;
+                        MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                        mv.visitCode();
+                        mv.visitInsn(Opcodes.ICONST_0);
+                        mv.visitInsn(Opcodes.IRETURN);
+                        mv.visitMaxs(1, 1);
+                        mv.visitEnd();
+                        return new MethodVisitor(Opcodes.ASM9) {};
+                    }
+                    // Toutes les autres méthodes : intercepter GETFIELD gfj.aS:Z (this.pause)
+                    // pour toujours retourner false. runTick() lit ce champ directement.
+                    MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                    patched[0] = true;
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitFieldInsn(int opcode, String owner,
+                                                   String fieldName, String fieldDesc) {
+                            if (opcode == Opcodes.GETFIELD
+                                    && "gfj".equals(owner)
+                                    && "aS".equals(fieldName)
+                                    && "Z".equals(fieldDesc)) {
+                                // GETFIELD consomme 'this' sur la pile et pousse la valeur.
+                                // On remplace par POP + ICONST_0 pour toujours retourner false.
+                                visitInsn(Opcodes.POP);
+                                visitInsn(Opcodes.ICONST_0);
+                            } else {
+                                super.visitFieldInsn(opcode, owner, fieldName, fieldDesc);
+                            }
+                        }
+                    };
+                }
+            }, ClassReader.EXPAND_FRAMES);
+
+            if (patched[0]) {
+                System.out.println("[P2P ASM] gfj.an()Z patché avec succès");
+                asmPatched.add("gfj");
+                return cw.toByteArray();
+            }
+            System.err.println("[P2P ASM] WARN: an()Z non trouvée dans gfj");
+            return null;
+        } catch (Exception e) {
+            System.err.println("[P2P ASM] Erreur patch gfj: " + e);
             return null;
         }
     }

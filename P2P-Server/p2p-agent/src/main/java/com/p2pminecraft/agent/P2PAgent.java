@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  */
 public class P2PAgent {
 
-    private static final String BUILD_VERSION = "2025-05-29-v13";
+    private static final String BUILD_VERSION = "2025-05-29-v15";
 
     public static void premain(String agentArgs, Instrumentation inst) {
         System.out.println("[P2P Agent] ===== VERSION " + BUILD_VERSION + " =====");
@@ -51,6 +51,8 @@ public class P2PAgent {
 
         // Découverte dynamique des classes cibles depuis les annotations @Mixin
         Set<String> mixinTargets = discoverMixinTargets();
+        // gfj (Minecraft) patché via ASM direct (pas de Mixin) — doit être retransformé si déjà chargé
+        mixinTargets.add("gfj");
 
         try {
             MixinBootstrap.init();
