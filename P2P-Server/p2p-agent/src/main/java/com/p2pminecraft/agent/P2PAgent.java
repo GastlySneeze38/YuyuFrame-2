@@ -8,7 +8,13 @@ import org.spongepowered.asm.mixin.MixinEnvironment;
 import org.spongepowered.asm.mixin.Mixins;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigSource;
 
+import org.objectweb.asm.*;
+
 import java.lang.instrument.Instrumentation;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Java agent P2P — utilise Mixin standalone pour les hooks bytecode.
@@ -16,55 +22,36 @@ import java.lang.instrument.Instrumentation;
  * Ordre des javaagents dans la JVM :
  *   1. -javaagent:mixin.jar          → MixinAgent.premain() capture l'Instrumentation
  *   2. -javaagent:p2p-agent.jar=...  → ce premain charge les mappings, active Mixin + réseau P2P
- *
- * Le paramètre optionnel mappings= pointe vers le fichier ProGuard Mojang.
- * Quand présent, MappingsRegistry est initialisé et ajouté à la chaîne de remapping Mixin
- * pour que LevelChunkMixin cible correctement le JAR Minecraft obfusqué non mappé.
  */
 public class P2PAgent {
 
+    private static final String BUILD_VERSION = "2025-05-29-v6";
+
     public static void premain(String agentArgs, Instrumentation inst) {
-        // Test de capture STDOUT : si cette ligne apparaît dans les logs Minecraft
-        // sous [STDOUT], System.out de l'agent est bien redirigé.
-        System.out.println("[P2P] === STDOUT_DIAGNOSTIC === agent démarré, System.out opérationnel ===");
+        System.out.println("[P2P Agent] ===== VERSION " + BUILD_VERSION + " =====");
         System.out.println("[P2P Agent] Démarrage (mode Mixin)...");
 
-        // Sauvegarder l'Instrumentation pour que offer() puisse l'utiliser
         P2PMixinService.setInstrumentation(inst);
 
         AgentConfig config = AgentConfig.parse(agentArgs);
         System.out.println("[P2P Agent] peerId=" + config.peerId + " name=" + config.peerName);
 
-        // Chargement des mappings Mojang (si fournis)
         if (config.mappingsPath != null && !config.mappingsPath.isEmpty()) {
             try {
                 MappingsRegistry.load(config.mappingsPath);
-                // Diagnostic critique : vérifier que tickChunks est mappé
-                // Si le résultat == "tickChunks", le mapping ne contient pas cette méthode
-                // → Mixin cherchera "tickChunks" dans axf → introuvable → injection ratée
-                String obfTick = MappingsRegistry.getObfMethodName(
-                    "net/minecraft/server/level/ServerLevel", "tickChunks");
-                System.out.println("[P2P] MAPPING tickChunks → \"" + obfTick + "\""
-                    + (obfTick.equals("tickChunks")
-                       ? "  ← NON MAPPÉ : méthode absente des client-mappings, hook impossible!"
-                       : "  ← OK"));
-                // Même diagnostic pour la classe cible
-                String obfClass = com.p2pminecraft.runtime.MappingsRegistry.INSTANCE
-                    .map("net/minecraft/server/level/ServerLevel");
+                String obfClass = MappingsRegistry.INSTANCE.map("net/minecraft/server/level/ServerLevel");
                 System.out.println("[P2P] MAPPING ServerLevel → \"" + obfClass + "\""
-                    + (obfClass.equals("net/minecraft/server/level/ServerLevel")
-                       ? "  ← NON MAPPÉ"
-                       : "  ← OK"));
+                    + (obfClass.equals("net/minecraft/server/level/ServerLevel") ? "  ← NON MAPPÉ" : "  ← OK"));
             } catch (Exception e) {
-                System.err.println("[P2P Agent] Mappings non chargés (" + config.mappingsPath + ") : " + e.getMessage());
+                System.err.println("[P2P Agent] Mappings non chargés : " + e.getMessage());
             }
         } else {
             System.out.println("[P2P Agent] Aucun mappings fourni — mode JAR mappé (noms Mojang directs)");
         }
 
-        // Active Mixin : MixinAgent (mixin.jar) a déjà capturé l'Instrumentation.
-        // Le remappeur MappingsRegistry est enregistré AVANT addConfiguration pour que
-        // la résolution des classes cibles (@Mixin) utilise les noms obfusqués corrects.
+        // Découverte dynamique des classes cibles depuis les annotations @Mixin
+        Set<String> mixinTargets = discoverMixinTargets();
+
         try {
             MixinBootstrap.init();
 
@@ -73,31 +60,21 @@ public class P2PAgent {
                 System.out.println("[P2P Agent] Remappeur Mojang → obfusqué enregistré dans Mixin");
             }
 
-            // mixin.jar s'initialise en phase PREINIT (son propre getInitialPhase()).
-            // Les mixins dans le tableau "mixins" du JSON sont pour la phase DEFAULT.
-            // Si on addConfiguration() en PREINIT, selectConfigs(PREINIT) ne trouve
-            // pas ces mixins → jamais préparés → transformClassBytes retourne null.
-            // Fix : avancer la phase vers DEFAULT AVANT addConfiguration() pour que
-            // la config soit associée au bon environnement.
             try {
                 java.lang.reflect.Method gotoPhase = MixinEnvironment.class
                     .getDeclaredMethod("gotoPhase", MixinEnvironment.Phase.class);
                 gotoPhase.setAccessible(true);
                 gotoPhase.invoke(null, MixinEnvironment.Phase.DEFAULT);
                 System.out.println("[P2P Agent] gotoPhase(DEFAULT) OK");
-                writeDebug("gotoPhase(DEFAULT) OK\n");
             } catch (Exception ex) {
                 System.err.println("[P2P Agent] gotoPhase(DEFAULT) erreur: " + ex);
-                writeDebug("gotoPhase(DEFAULT) ERREUR: " + ex + "\n");
             }
 
             Mixins.addConfiguration("mixins.p2p.json", (IMixinConfigSource) null);
-            System.out.println("[P2P Agent] Config Mixin enregistrée (phase DEFAULT)");
+            System.out.println("[P2P Agent] Config Mixin enregistrée");
 
             P2PMixinService.installWrapper();
 
-            // inject() déclenche select(DEFAULT) + redefineClasses pour les classes
-            // déjà chargées — en phase DEFAULT, nos mixins sont éligibles.
             try {
                 java.lang.reflect.Method injectMethod =
                     MixinBootstrap.class.getDeclaredMethod("inject");
@@ -108,91 +85,168 @@ public class P2PAgent {
                 System.err.println("[P2P Agent] inject() non accessible: " + ex.getMessage());
             }
 
-            retransformEarlyLoadedTargets(inst);
+            retransformLoadedTargets(inst, mixinTargets);
         } catch (Exception e) {
             System.err.println("[P2P Agent] ERREUR Mixin bootstrap : " + e.getMessage());
             e.printStackTrace(System.err);
         }
 
-        // Démarre le réseau P2P (P2PNetwork, WebSocket signaling)
         RuntimeInitializer.onGameStart();
-
-        // Retransformation différée : certaines classes peuvent être chargées plus tard
-        scheduleDelayedRetransform(inst);
+        scheduleDelayedRetransform(inst, mixinTargets);
 
         System.out.println("[P2P Agent] Prêt — en attente du chargement Minecraft");
     }
 
-    /** Retransforme eqq/axf s'ils ont été chargés avant notre addTransformer. */
-    private static void retransformEarlyLoadedTargets(Instrumentation inst) {
+    /**
+     * Lit mixins.p2p.json puis pour chaque classe Mixin lit directement les bytes .class
+     * via ASM pour extraire l'annotation @Mixin — sans passer par le class loader Java,
+     * ce qui évite tout problème de classloader mismatch avec mixin.jar.
+     */
+    private static Set<String> discoverMixinTargets() {
+        Set<String> targets = new LinkedHashSet<>();
         try {
-            int count = 0;
-            boolean foundAxf = false, foundEqq = false;
-            for (Class<?> cls : inst.getAllLoadedClasses()) {
-                String name = cls.getName();
-                if (name.equals("eqq") || name.equals("axf")) {
-                    boolean modifiable = inst.isModifiableClass(cls);
-                    System.out.println("[P2P Agent] Retransform immédiat: " + name
-                            + " | modifiable=" + modifiable);
-                    writeDebug("retransform: " + name + " modifiable=" + modifiable + "\n");
-                    if (name.equals("axf")) checkP2PHooks(cls, "avant retransform immédiat");
-                    if (modifiable) {
-                        try {
-                            inst.retransformClasses(cls);
-                            writeDebug("retransformClasses(" + name + ") OK\n");
-                            count++;
-                        } catch (Throwable ex) {
-                            writeDebug("retransformClasses(" + name + ") ERREUR: " + ex + "\n");
-                            System.err.println("[P2P Agent] Retransform " + name + " erreur: " + ex);
-                        }
-                    }
-                    if (name.equals("axf")) {
-                        checkP2PHooks(cls, "après retransform immédiat");
-                        foundAxf = true;
-                    }
-                    if (name.equals("eqq")) foundEqq = true;
+            ClassLoader agentCL = P2PAgent.class.getClassLoader();
+            try (java.io.InputStream cfgIs = agentCL.getResourceAsStream("mixins.p2p.json")) {
+                if (cfgIs == null) {
+                    System.err.println("[P2P Agent] mixins.p2p.json introuvable");
+                    return targets;
                 }
-            }
-            System.out.println("[P2P Agent] Retransformations immédiates: " + count
-                    + " (axf=" + foundAxf + " eqq=" + foundEqq + ")");
-            if (!foundAxf) {
-                System.out.println("[P2P Agent] WARN: axf (ServerLevel) pas encore chargé — sera traité par le thread différé");
+                String json = new String(cfgIs.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                String pkg  = jsonString(json, "package");
+                if (pkg == null) return targets;
+
+                int arrStart = json.indexOf('[', json.indexOf("\"mixins\""));
+                int arrEnd   = json.indexOf(']', arrStart);
+                if (arrStart < 0 || arrEnd < 0) return targets;
+
+                Matcher m = Pattern.compile("\"([A-Za-z][A-Za-z0-9$]*)\"")
+                        .matcher(json.substring(arrStart + 1, arrEnd));
+                while (m.find()) {
+                    String simpleName = m.group(1);
+                    String classRes   = pkg.replace('.', '/') + "/" + simpleName + ".class";
+                    System.out.println("[P2P Agent] Scan bytecode: " + simpleName);
+                    try (java.io.InputStream cls = agentCL.getResourceAsStream(classRes)) {
+                        if (cls == null) {
+                            System.err.println("[P2P Agent]   → .class introuvable: " + classRes);
+                            continue;
+                        }
+                        targets.addAll(extractMixinTargets(cls.readAllBytes(), simpleName));
+                    } catch (Throwable e) {
+                        System.err.println("[P2P Agent]   → ERREUR " + simpleName + ": " + e);
+                    }
+                }
             }
         } catch (Throwable t) {
-            System.err.println("[P2P Agent] Retransform immédiat erreur: " + t);
+            System.err.println("[P2P Agent] discoverMixinTargets erreur: " + t);
         }
+        System.out.println("[P2P Agent] " + targets.size() + " cible(s) Mixin: " + targets);
+        return targets;
     }
 
-    /** Lance un thread qui retransforme eqq/axf dès qu'ils apparaissent dans les classes chargées. */
-    private static void scheduleDelayedRetransform(Instrumentation inst) {
+    /**
+     * Utilise ASM pour lire le bytecode d'une classe Mixin et extraire les classes
+     * cibles depuis l'annotation @Mixin(value/targets).
+     * Aucun class loading → aucun problème de class loader mismatch.
+     */
+    private static Set<String> extractMixinTargets(byte[] classBytes, String simpleName) {
+        Set<String> result = new LinkedHashSet<>();
+        new ClassReader(classBytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+                if (!desc.equals("Lorg/spongepowered/asm/mixin/Mixin;")) return null;
+                return new AnnotationVisitor(Opcodes.ASM9) {
+                    @Override
+                    public AnnotationVisitor visitArray(String name) {
+                        if (name.equals("value")) {
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                @Override public void visit(String n, Object val) {
+                                    if (!(val instanceof Type)) return;
+                                    String slash = ((Type) val).getInternalName();
+                                    String obf   = MappingsRegistry.INSTANCE.map(slash);
+                                    result.add(obf.replace('/', '.'));
+                                    System.out.println("[P2P Agent]   → " + simpleName
+                                            + " value: " + slash + " → " + obf.replace('/', '.'));
+                                }
+                            };
+                        }
+                        if (name.equals("targets")) {
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                @Override public void visit(String n, Object val) {
+                                    if (!(val instanceof String)) return;
+                                    String slash = ((String) val).replace('.', '/');
+                                    String obf   = MappingsRegistry.INSTANCE.map(slash);
+                                    result.add(obf.replace('/', '.'));
+                                    System.out.println("[P2P Agent]   → " + simpleName
+                                            + " targets: " + val + " → " + obf.replace('/', '.'));
+                                }
+                            };
+                        }
+                        return null;
+                    }
+                };
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        if (result.isEmpty())
+            System.err.println("[P2P Agent]   → WARN: aucune cible trouvée dans " + simpleName);
+        return result;
+    }
+
+    private static String jsonString(String json, String key) {
+        int i = json.indexOf("\"" + key + "\"");
+        if (i < 0) return null;
+        i = json.indexOf('"', json.indexOf(':', i) + 1);
+        if (i < 0) return null;
+        int end = json.indexOf('"', i + 1);
+        return end > i ? json.substring(i + 1, end) : null;
+    }
+
+    /** Retransforme les classes cibles déjà chargées au moment de l'appel. */
+    private static void retransformLoadedTargets(Instrumentation inst, Set<String> targets) {
+        if (targets.isEmpty()) return;
+        int count = 0;
+        for (Class<?> cls : inst.getAllLoadedClasses()) {
+            if (!targets.contains(cls.getName())) continue;
+            boolean modifiable = inst.isModifiableClass(cls);
+            System.out.println("[P2P Agent] Retransform immédiat: " + cls.getName()
+                    + " | modifiable=" + modifiable);
+            if (!modifiable) continue;
+            try {
+                inst.retransformClasses(cls);
+                count++;
+                checkP2PHooks(cls, "après retransform immédiat");
+            } catch (Throwable ex) {
+                System.err.println("[P2P Agent] Retransform " + cls.getName() + " erreur: " + ex);
+            }
+        }
+        System.out.println("[P2P Agent] Retransformations immédiates: " + count + "/" + targets.size());
+    }
+
+    /** Surveille l'apparition des classes cibles et les retransforme dès leur chargement. */
+    private static void scheduleDelayedRetransform(Instrumentation inst, Set<String> targets) {
+        if (targets.isEmpty()) return;
         Thread t = new Thread(() -> {
+            Set<String> remaining = new LinkedHashSet<>(targets);
             long deadline = System.currentTimeMillis() + 30_000;
-            boolean foundEqq = false, foundAxf = false;
-            while (System.currentTimeMillis() < deadline && !(foundEqq && foundAxf)) {
+            while (!remaining.isEmpty() && System.currentTimeMillis() < deadline) {
                 try { Thread.sleep(200); } catch (InterruptedException e) { return; }
                 for (Class<?> cls : inst.getAllLoadedClasses()) {
-                    String name = cls.getName();
-                    if (!foundEqq && name.equals("eqq")) {
-                        foundEqq = true;
-                        boolean mod = inst.isModifiableClass(cls);
-                        System.out.println("[P2P Agent] Retransformation différée: eqq | modifiable=" + mod);
-                        try { if (mod) inst.retransformClasses(cls); }
-                        catch (Throwable ex) { System.err.println("[P2P Agent] Retransform eqq erreur: " + ex); }
-                    }
-                    if (!foundAxf && name.equals("axf")) {
-                        foundAxf = true;
-                        boolean mod = inst.isModifiableClass(cls);
-                        // Vérifier si MixinAgent a déjà injecté le hook (avant notre retransform)
-                        checkP2PHooks(cls, "avant retransform différé");
-                        System.out.println("[P2P Agent] Retransformation différée: axf | modifiable=" + mod);
-                        try { if (mod) inst.retransformClasses(cls); }
-                        catch (Throwable ex) { System.err.println("[P2P Agent] Retransform axf erreur: " + ex); }
-                        // Vérifier après (via reflection — peut ne pas refléter les nouvelles méthodes immédiatement)
+                    if (!remaining.remove(cls.getName())) continue;
+                    boolean mod = inst.isModifiableClass(cls);
+                    System.out.println("[P2P Agent] Retransform différé: " + cls.getName()
+                            + " | modifiable=" + mod);
+                    if (!mod) continue;
+                    try {
+                        inst.retransformClasses(cls);
                         checkP2PHooks(cls, "après retransform différé");
+                    } catch (Throwable ex) {
+                        System.err.println("[P2P Agent] Retransform " + cls.getName() + " erreur: " + ex);
                     }
                 }
             }
-            System.out.println("[P2P Agent] Thread retransform terminé (eqq=" + foundEqq + " axf=" + foundAxf + ")");
+            if (!remaining.isEmpty()) {
+                System.out.println("[P2P Agent] WARN: cibles jamais chargées: " + remaining);
+            }
+            System.out.println("[P2P Agent] Thread retransform terminé");
         }, "P2P-Retransform");
         t.setDaemon(true);
         t.start();
@@ -210,26 +264,16 @@ public class P2PAgent {
     }
 
     private static void checkP2PHooks(Class<?> cls, String when) {
-        try {
-            int total = 0;
-            int hooks = 0;
-            for (java.lang.reflect.Method m : cls.getDeclaredMethods()) {
-                total++;
-                if (m.getName().startsWith("p2p$")) {
-                    hooks++;
-                    String msg = "hook: " + cls.getName() + "." + m.getName() + " (" + when + ")\n";
-                    System.out.println("[P2P Debug] " + msg.trim());
-                    writeDebug(msg);
-                }
+        int hooks = 0;
+        for (java.lang.reflect.Method m : cls.getDeclaredMethods()) {
+            if (m.getName().startsWith("p2p$")) {
+                hooks++;
+                System.out.println("[P2P Debug] hook: " + cls.getName() + "." + m.getName()
+                        + " (" + when + ")");
             }
-            String summary = "checkHooks(" + when + "): " + cls.getName()
-                + " hooks=" + hooks + "/" + total + "\n";
-            System.out.println("[P2P Debug] " + summary.trim());
-            writeDebug(summary);
-        } catch (Throwable t) {
-            writeDebug("checkP2PHooks error: " + t + "\n");
-            System.err.println("[P2P Debug] checkP2PHooks error: " + t);
         }
+        System.out.println("[P2P Debug] checkHooks(" + when + "): " + cls.getName()
+                + " hooks=" + hooks);
     }
 
     public static void agentmain(String agentArgs, Instrumentation inst) {

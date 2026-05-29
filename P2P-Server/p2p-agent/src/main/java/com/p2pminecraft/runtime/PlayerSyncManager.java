@@ -78,6 +78,22 @@ public class PlayerSyncManager {
         GhostManager.updateRemotePlayer(fromId, x, y, z, yaw, pitch);
     }
 
+    /**
+     * Itère les joueurs du ServerLevel et broadcast leurs positions.
+     * Appelé depuis le tick hook (ServerLevelMixin) sur le thread serveur.
+     */
+    public static void broadcastFromLevel(Object level) {
+        try {
+            String serverLevelClass = "net/minecraft/server/level/ServerLevel";
+            String playersName = MappingsRegistry.getObfMethodName(serverLevelClass, "players");
+            java.lang.reflect.Method m = level.getClass().getMethod(playersName);
+            java.util.List<?> players = (java.util.List<?>) m.invoke(level);
+            for (Object player : players) {
+                onEntityTick(player);
+            }
+        } catch (Exception ignored) {}
+    }
+
     public static Map<String, double[]> getRemotePlayers() {
         return remotePlayers;
     }

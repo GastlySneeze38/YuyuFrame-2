@@ -78,14 +78,17 @@ public class GhostManager {
             Object source   = server.getClass().getMethod(sourceName).invoke(server);
             Object commands = server.getClass().getMethod(commandsName).invoke(server);
 
+            // performPrefixedCommand(CommandSourceStack, String) → "a" en obfusqué
+            // performCommand(ParseResults, String) mappe aussi vers "a" — on les distingue
+            // car ParseResults vient de brigadier (non obfusqué, package "com.mojang.brigadier")
+            String cmdClass = "net/minecraft/commands/Commands";
+            String performName = MappingsRegistry.getObfMethodName(cmdClass, "performPrefixedCommand");
             for (Method m : commands.getClass().getMethods()) {
-                if (m.getParameterCount() != 2) continue;
+                if (!m.getName().equals(performName) || m.getParameterCount() != 2) continue;
                 if (!m.getParameterTypes()[1].equals(String.class)) continue;
-                String n = m.getName();
-                if (n.contains("prefixed") || (n.contains("perform") && n.contains("ommand"))) {
-                    m.invoke(commands, source, cmd);
-                    return true;
-                }
+                if (m.getParameterTypes()[0].getName().contains("brigadier")) continue;
+                m.invoke(commands, source, cmd);
+                return true;
             }
             return false;
         } catch (Exception e) {
