@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  */
 public class P2PAgent {
 
-    private static final String BUILD_VERSION = "2025-05-29-v9";
+    private static final String BUILD_VERSION = "2025-05-29-v13";
 
     public static void premain(String agentArgs, Instrumentation inst) {
         System.out.println("[P2P Agent] ===== VERSION " + BUILD_VERSION + " =====");
@@ -231,6 +231,17 @@ public class P2PAgent {
                 try { Thread.sleep(200); } catch (InterruptedException e) { return; }
                 for (Class<?> cls : inst.getAllLoadedClasses()) {
                     if (!remaining.remove(cls.getName())) continue;
+                    // Si la classe a déjà des hooks p2p$ c'est qu'elle a été mixée
+                    // lors de son chargement initial (après enregistrement du transformer).
+                    // retransformClasses repart des bytes originaux et ne peut pas ajouter
+                    // de nouvelles méthodes → il annulerait le mixin. On saute le retransform.
+                    int alreadyHooks = countP2PHooks(cls);
+                    if (alreadyHooks > 0) {
+                        System.out.println("[P2P Agent] Cible déjà mixée (initial load): "
+                                + cls.getName() + " hooks=" + alreadyHooks + " — skip retransform");
+                        checkP2PHooks(cls, "initial load (skip retransform)");
+                        continue;
+                    }
                     boolean mod = inst.isModifiableClass(cls);
                     System.out.println("[P2P Agent] Retransform différé: " + cls.getName()
                             + " | modifiable=" + mod);
@@ -261,6 +272,17 @@ public class P2PAgent {
                 java.nio.file.StandardOpenOption.CREATE,
                 java.nio.file.StandardOpenOption.APPEND);
         } catch (Exception ignored) {}
+    }
+
+    private static int countP2PHooks(Class<?> cls) {
+        int n = 0;
+        for (java.lang.reflect.Method m : cls.getDeclaredMethods())
+            if (m.getName().startsWith("p2p$")) n++;
+        // Pour les classes patchées par ASM direct (ex: iqa), aucune méthode p2p$
+        // n'est ajoutée. On compte quand même comme "patché" si le wrapper le signale.
+        if (n == 0 && com.p2pminecraft.mixin.service.P2PMixinTransformerWrapper.isAsmPatched(cls.getName()))
+            n = 1;
+        return n;
     }
 
     private static void checkP2PHooks(Class<?> cls, String when) {
