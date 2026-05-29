@@ -6,7 +6,7 @@
   "mixins": [
     "ServerLevelMixin",
     "LevelChunkMixin",
-    "MinecraftMixin"
+    "IntegratedServerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

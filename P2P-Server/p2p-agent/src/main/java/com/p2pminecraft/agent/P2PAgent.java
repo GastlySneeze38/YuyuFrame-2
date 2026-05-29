@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  */
 public class P2PAgent {
 
-    private static final String BUILD_VERSION = "2025-05-29-v6";
+    private static final String BUILD_VERSION = "2025-05-29-v9";
 
     public static void premain(String agentArgs, Instrumentation inst) {
         System.out.println("[P2P Agent] ===== VERSION " + BUILD_VERSION + " =====");
