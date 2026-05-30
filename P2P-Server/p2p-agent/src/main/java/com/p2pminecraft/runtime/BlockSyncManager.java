@@ -43,9 +43,17 @@ public class BlockSyncManager {
 
     public static Object getStoredLevel() { return levelRef.get(); }
 
+    public static volatile long levelRegisteredAt = 0;
+
     public static void registerLevel(Object level) {
-        if (level != null && MappingsRegistry.isInstance(level, "net/minecraft/server/level/ServerLevel"))
+        if (level != null && MappingsRegistry.isInstance(level, "net/minecraft/server/level/ServerLevel")) {
+            boolean firstLoad = levelRef.get() == null;
             levelRef.set(level);
+            if (firstLoad) {
+                levelRegisteredAt = System.currentTimeMillis();
+                SnapshotManager.onWorldLoaded();
+            }
+        }
     }
 
     // ── Outbound ───────────────────────────────────────────────────────────────

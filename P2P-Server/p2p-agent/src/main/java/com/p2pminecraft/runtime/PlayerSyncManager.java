@@ -88,6 +88,18 @@ public class PlayerSyncManager {
             String playersName = MappingsRegistry.getObfMethodName(serverLevelClass, "players");
             java.lang.reflect.Method m = level.getClass().getMethod(playersName);
             java.util.List<?> players = (java.util.List<?>) m.invoke(level);
+            if (!players.isEmpty()) {
+                Object first = players.get(0);
+                // Notifie SnapshotManager de la présence du joueur (position en chunks)
+                try {
+                    String entityClass = "net/minecraft/world/entity/Entity";
+                    String gx = MappingsRegistry.getObfMethodName(entityClass, "getX");
+                    String gz = MappingsRegistry.getObfMethodName(entityClass, "getZ");
+                    double x = (double) first.getClass().getMethod(gx).invoke(first);
+                    double z = (double) first.getClass().getMethod(gz).invoke(first);
+                    SnapshotManager.notifyPlayerPresent((int) Math.floor(x) >> 4, (int) Math.floor(z) >> 4);
+                } catch (Exception ignored2) {}
+            }
             for (Object player : players) {
                 onEntityTick(player);
             }

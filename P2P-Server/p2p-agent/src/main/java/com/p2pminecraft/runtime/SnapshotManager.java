@@ -35,6 +35,22 @@ public class SnapshotManager {
     /** Pairs ayant déjà reçu un snapshot cette session. */
     private static final Set<String> sent = ConcurrentHashMap.newKeySet();
 
+    /** Pairs connectés avant l'ouverture du monde — en attente de onWorldLoaded(). */
+    private static final Set<String> pendingWorld = ConcurrentHashMap.newKeySet();
+
+    /** Position du joueur local en chunks — null tant qu'aucun joueur n'est dans le monde. */
+    private static volatile int[] localPlayerChunk = null;
+
+    /** Appelé par PlayerSyncManager.broadcastFromLevel() à chaque tick si un joueur est présent. */
+    public static void notifyPlayerPresent(int chunkX, int chunkZ) {
+        localPlayerChunk = new int[]{chunkX, chunkZ};
+    }
+
+    /** Compteur de tentatives par peer (abandon après MAX_RETRY ticks sans joueur). */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Integer> retries =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int MAX_RETRY = 600; // 30s à 20 TPS
+
     /** File d'envois à traiter sur le thread serveur. */
     private static final ConcurrentLinkedQueue<String> sendQueue = new ConcurrentLinkedQueue<>();
 
@@ -48,29 +64,60 @@ public class SnapshotManager {
 
     // ── Déclencheurs ──────────────────────────────────────────────────────────
 
-    /** Appelé quand un pair NOUVEAU rejoint (peer_joined) — on lui envoie le snapshot. */
+    /** Appelé quand un pair NOUVEAU rejoint (peer_joined). */
     public static void onNewPeer(String peerId) {
-        if (sent.add(peerId)) {
-            sendQueue.offer(peerId);
+        if (BlockSyncManager.levelRef.get() != null) {
+            // Monde déjà ouvert → snapshot immédiat
+            if (sent.add(peerId)) sendQueue.offer(peerId);
+        } else {
+            // Monde pas encore ouvert → mémoriser, sera déclenché par onWorldLoaded()
+            pendingWorld.add(peerId);
         }
+    }
+
+    /**
+     * Appelé par BlockSyncManager.registerLevel() au premier chargement du monde.
+     * Déclenche les snapshots pour tous les pairs déjà connectés.
+     */
+    public static void onWorldLoaded() {
+        for (String peerId : pendingWorld) {
+            if (sent.add(peerId)) {
+                sendQueue.offer(peerId);
+                System.out.println("[P2P] Snapshot planifié (monde chargé) → " + peerId.substring(0, 8));
+            }
+        }
+        pendingWorld.clear();
     }
 
     /** Appelé pour un pair DÉJÀ présent (peer_list initiale) — on ne lui envoie rien. */
     public static void markKnown(String peerId) {
+        pendingWorld.remove(peerId);
         sent.add(peerId);
     }
 
     public static void onPeerLeft(String peerId) {
         sent.remove(peerId);
+        pendingWorld.remove(peerId);
+    }
+
+    /** Réinitialise l'état quand le joueur quitte le monde. */
+    public static void onWorldUnloaded() {
+        localPlayerChunk = null;
+        sent.clear();
+        pendingWorld.clear();
+        sendQueue.clear();
+        retries.clear();
     }
 
     // ── Flush (thread serveur, depuis afterChunkTick) ─────────────────────────
 
     public static void flush() {
+        // Drainer dans une liste locale : les retries (peer re-mis en queue par sendSnapshot)
+        // ne sont traités qu'au tick suivant, pas dans la même boucle.
+        List<String> toSend = new ArrayList<>();
         String peerId;
-        while ((peerId = sendQueue.poll()) != null) {
-            sendSnapshot(peerId);
-        }
+        while ((peerId = sendQueue.poll()) != null) toSend.add(peerId);
+        for (String p : toSend) sendSnapshot(p);
 
         // Throttle : max APPLY_PER_TICK chunks par tick pour éviter les spikes de lag
         byte[] data;
@@ -90,7 +137,16 @@ public class SnapshotManager {
         P2PNetwork net = RuntimeInitializer.getNetwork();
         if (net == null) return;
 
-        int[] pos = getPlayerChunkPos(level);
+        // Attendre que PlayerSyncManager.broadcastFromLevel() confirme la présence du joueur
+        int[] pos = localPlayerChunk;
+        if (pos == null) {
+            int n = retries.merge(peerId, 1, Integer::sum);
+            if (n < MAX_RETRY) sendQueue.offer(peerId);
+            else { retries.remove(peerId); System.out.println("[P2P] Snapshot abandonné (timeout) → " + peerId.substring(0, 8)); }
+            return;
+        }
+        retries.remove(peerId);
+
         int cx = pos[0], cz = pos[1];
         DistributedChunkManager.setMyPosition(cx, cz);
 
@@ -369,41 +425,4 @@ public class SnapshotManager {
         }
     }
 
-    /** Retourne [chunkX, chunkZ] du premier joueur présent dans le level, ou [0,0] si absent. */
-    private static int[] getPlayerChunkPos(Object level) {
-        try {
-            String playersName = MappingsRegistry.getObfMethodName(
-                "net/minecraft/world/level/Level", "players");
-            for (Method m : level.getClass().getMethods()) {
-                if (!m.getName().equals(playersName) || m.getParameterCount() != 0) continue;
-                Object result = m.invoke(level);
-                if (!(result instanceof java.util.List<?> players) || players.isEmpty()) break;
-                Object player = players.get(0);
-                int bx = getEntityBlockCoord(player, "getBlockX");
-                int bz = getEntityBlockCoord(player, "getBlockZ");
-                return new int[]{bx >> 4, bz >> 4};
-            }
-        } catch (Exception e) {
-            System.err.println("[P2P] getPlayerChunkPos: " + e.getMessage());
-        }
-        return new int[]{DistributedChunkManager.getMyChunkX(), DistributedChunkManager.getMyChunkZ()};
-    }
-
-    private static int getEntityBlockCoord(Object entity, String mojangMethod) {
-        String obf = MappingsRegistry.getObfMethodName(
-            "net/minecraft/world/entity/Entity", mojangMethod);
-        Class<?> cls = entity.getClass();
-        while (cls != null && cls != Object.class) {
-            try {
-                Method m = cls.getDeclaredMethod(obf);
-                m.setAccessible(true);
-                return (int) m.invoke(entity);
-            } catch (NoSuchMethodException ignored) {
-                cls = cls.getSuperclass();
-            } catch (Exception e) {
-                break;
-            }
-        }
-        return 0;
-    }
 }
