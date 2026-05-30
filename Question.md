@@ -1,4 +1,4 @@
-Couche 1 terminer faire couche 2 et amiliorer la sync rien ne va
+Couche 1 terminer faire couche 2 et Tester la sync avec le nouveau mode server
 
 build methode : 
 

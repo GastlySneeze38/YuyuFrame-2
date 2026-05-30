@@ -24,18 +24,23 @@ public class GhostManager {
     public static void updateRemotePlayer(String peerId,
                                           double x, double y, double z,
                                           float yaw, float pitch) {
+        // Ignorer les coordonnées invalides (NaN, Inf) reçues avant sync complet
+        if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)
+                || !Float.isFinite(yaw) || !Float.isFinite(pitch)) return;
+
         String name = peerGhosts.computeIfAbsent(peerId,
             id -> "P2P_" + id.substring(0, Math.min(8, id.length())));
 
         if (spawned.add(name)) {
-            String nbt = String.format(
+            // Locale.ROOT garantit le point comme séparateur décimal quelle que soit la locale système
+            String nbt = String.format(java.util.Locale.ROOT,
                 "{CustomName:'{\"text\":\"%s\"}',NoAI:1b,Silent:1b,Invulnerable:1b,PersistenceRequired:1b}",
                 name);
-            pendingCmds.offer(String.format(
+            pendingCmds.offer(String.format(java.util.Locale.ROOT,
                 "summon minecraft:zombie %.3f %.3f %.3f %s", x, y, z, nbt));
             System.out.println("[P2P] Ghost spawné : " + name);
         } else {
-            pendingCmds.offer(String.format(
+            pendingCmds.offer(String.format(java.util.Locale.ROOT,
                 "tp @e[name=%s,type=minecraft:zombie,limit=1] %.3f %.3f %.3f %.1f %.1f",
                 name, x, y, z, (double) yaw, (double) pitch));
         }

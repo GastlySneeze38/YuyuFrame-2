@@ -67,7 +67,7 @@ public class DistributedChunkManager {
     public static void onDataReceived(String fromId, byte[] data) {
         if (data.length == 0) return;
         byte type = data[0];
-        if (type == BlockSyncManager.TYPE_BLOCK) {
+        if (type == BlockSyncManager.TYPE_BLOCK || type == BlockSyncManager.TYPE_BLOCK_BATCH) {
             BlockSyncManager.handleReceived(data);
         } else if (type == PlayerSyncManager.TYPE_PLAYER) {
             PlayerSyncManager.handleReceived(fromId, data);
