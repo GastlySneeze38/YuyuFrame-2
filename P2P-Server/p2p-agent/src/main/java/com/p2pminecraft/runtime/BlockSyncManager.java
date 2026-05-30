@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * Protocole :
  *   TYPE_BLOCK       0x01  [int x][int y][int z][short idLen][bytes id]   (legacy)
- *   TYPE_BLOCK_BATCH 0x02  [int count] puis count × entrée ci-dessus
+ *   TYPE_BLOCK_BATCH 0x03  [int count] puis count × entrée ci-dessus
  */
 public class BlockSyncManager {
 
