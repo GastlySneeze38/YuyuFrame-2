@@ -11,6 +11,7 @@ pub async fn launch_game(
     app: tauri::AppHandle,
     instance_id: String,
     p2p: Option<bool>,
+    p2p_guest: Option<bool>,
 ) -> Result<(), String> {
     let session = {
         let s = state.read().await;
@@ -94,6 +95,7 @@ pub async fn launch_game(
             app.clone(),
             state_clone.clone(),
             p2p.unwrap_or(false),
+            p2p_guest.unwrap_or(false),
             &window_label,
         )
         .await

@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use flate2::{Compression, write::GzEncoder};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -56,6 +58,7 @@ pub async fn download_and_launch(
     app: tauri::AppHandle,
     state: SharedState,
     p2p: bool,
+    p2p_guest: bool,
     console_label: &str,
 ) -> Result<()> {
     let mc_dir = minecraft_dir();
@@ -337,6 +340,22 @@ pub async fn download_and_launch(
     // Libs + loader terminés, on attend que les assets finissent avant de lancer.
     assets_task.await.map_err(|e| anyhow!("Tâche assets : {}", e))??;
 
+    // ── P2P Guest : dossier de jeu temporaire ────────────────────────────────
+    // Les sauvegardes vont dans %TEMP%\YuyuFrame\p2p_<uuid>\ et sont supprimées
+    // automatiquement à la fermeture de Minecraft.
+    let mc_game_dir: PathBuf = if p2p && p2p_guest {
+        let temp_path = std::env::temp_dir()
+            .join("YuyuFrame")
+            .join(format!("p2p_{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&temp_path).await?;
+        create_p2p_guest_world(&temp_path)?;
+        log_to_console(&app, &console_label,
+            &format!("[P2P] Mode invité — dossier temp : {}", temp_path.display()), "out");
+        temp_path
+    } else {
+        game_dir.to_path_buf()
+    };
+
     // ── Launch ───────────────────────────────────────────────────────────────
 
     set_progress(&app, 95, 100, "Lancement de Minecraft...");
@@ -359,9 +378,11 @@ pub async fn download_and_launch(
     args.extend(extra_jvm_args);
     args.extend(p2p_jvm_args);
     args.extend(["-cp".to_string(), classpath_str, main_class]);
-    args.extend(build_game_args(&details, session, game_dir, &assets_dir, version_id));
+    args.extend(build_game_args(&details, session, &mc_game_dir, &assets_dir, version_id));
     args.extend(extra_game_args);
-
+    if p2p && p2p_guest {
+        args.extend(["--quickPlaySingleplayer".to_string(), "p2p_world".to_string()]);
+    }
 
     // Laisser à la fenêtre console le temps d'enregistrer ses listeners JS
     // avant de spawner Java — évite de perdre les premières lignes de log
@@ -372,7 +393,7 @@ pub async fn download_and_launch(
     #[cfg(target_os = "windows")]
     unsafe { timeBeginPeriod(1); }
 
-    let log_path = game_dir.join("logs").join("latest.log");
+    let log_path = mc_game_dir.join("logs").join("latest.log");
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_tailer = stop_flag.clone();
     let app_log = app.clone();
@@ -380,7 +401,7 @@ pub async fn download_and_launch(
 
     let mut child = tokio::process::Command::new(&java)
         .args(&args)
-        .current_dir(game_dir)
+        .current_dir(&mc_game_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
@@ -477,6 +498,15 @@ pub async fn download_and_launch(
     // Restaure la résolution du timer Windows
     #[cfg(target_os = "windows")]
     unsafe { timeEndPeriod(1); }
+
+    // Supprimer le dossier temp invité P2P
+    if p2p && p2p_guest {
+        if let Err(e) = tokio::fs::remove_dir_all(&mc_game_dir).await {
+            tracing::warn!("[P2P] Nettoyage dossier temp échoué : {}", e);
+        } else {
+            tracing::info!("[P2P] Dossier temp supprimé : {}", mc_game_dir.display());
+        }
+    }
 
     Ok(())
 }
@@ -751,6 +781,74 @@ async fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> Result<()
             std::io::copy(&mut entry, &mut out)?;
         }
     }
+    Ok(())
+}
+
+/// Crée un monde Minecraft minimal dans `<game_dir>/saves/p2p_world/`.
+/// Le `level.dat` est un NBT gzippé avec les champs stricts requis par MC 1.21+.
+fn create_p2p_guest_world(game_dir: &std::path::Path) -> Result<()> {
+    let world_dir = game_dir.join("saves").join("p2p_world");
+    std::fs::create_dir_all(&world_dir)?;
+
+    // ── Construire les bytes NBT non compressé ────────────────────────────────
+    let mut nbt: Vec<u8> = Vec::new();
+
+    macro_rules! name {
+        ($s:expr) => {{
+            let b = $s.as_bytes();
+            nbt.extend_from_slice(&(b.len() as u16).to_be_bytes());
+            nbt.extend_from_slice(b);
+        }};
+    }
+    macro_rules! compound { ($n:expr) => { nbt.push(10); name!($n); }; }
+    macro_rules! end       {           () => { nbt.push(0); }; }
+    macro_rules! int       { ($n:expr, $v:expr) => { nbt.push(3); name!($n); nbt.extend_from_slice(&($v as i32).to_be_bytes()); }; }
+    macro_rules! long      { ($n:expr, $v:expr) => { nbt.push(4); name!($n); nbt.extend_from_slice(&($v as i64).to_be_bytes()); }; }
+    macro_rules! byte_tag  { ($n:expr, $v:expr) => { nbt.push(1); name!($n); nbt.push($v as u8); }; }
+    macro_rules! string    { ($n:expr, $v:expr) => {
+        nbt.push(8); name!($n);
+        let b = ($v).as_bytes();
+        nbt.extend_from_slice(&(b.len() as u16).to_be_bytes());
+        nbt.extend_from_slice(b);
+    }; }
+
+    compound!("");          // root (nom vide)
+      int!("DataVersion", 3953i32);  // MC lit DataVersion au niveau racine depuis 1.12
+      compound!("Data");
+        int!("DataVersion", 3953i32);
+        string!("LevelName", "P2P Session");
+        int!("GameType", 0i32);       // survival
+        int!("Difficulty", 1i32);     // easy
+        byte_tag!("hardcore", 0u8);
+        byte_tag!("allowCommands", 1u8);
+        byte_tag!("initialized", 0u8);
+        int!("SpawnX", 0i32);
+        int!("SpawnY", 64i32);
+        int!("SpawnZ", 0i32);
+        long!("Time", 0i64);
+        long!("DayTime", 6000i64);
+        compound!("Version");
+          int!("Id", 3953i32);
+          string!("Name", "1.21");
+          string!("Series", "main");
+          byte_tag!("Snapshot", 0u8);
+        end!();
+        compound!("WorldGenSettings");
+          long!("seed", 0i64);
+          byte_tag!("generate_features", 1u8);
+          byte_tag!("bonus_chest", 0u8);
+          compound!("dimensions"); end!();  // dimensions vide — MC génère le reste
+        end!();
+      end!();  // Data
+    end!();    // root
+
+    // ── GZIP compresser → level.dat + level.dat_old ──────────────────────────
+    let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+    gz.write_all(&nbt)?;
+    let compressed = gz.finish()?;
+    std::fs::write(world_dir.join("level.dat"), &compressed)?;
+    std::fs::write(world_dir.join("level.dat_old"), &compressed)?;
+
     Ok(())
 }
 

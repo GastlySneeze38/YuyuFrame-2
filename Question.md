@@ -1,4 +1,20 @@
-Couche 1 terminer faire couche 2 et Tester la sync avec le nouveau mode server
+La sync est bonne ! Mais la snapshot ne va pas du tout : 
+-rien ne s'applique dans le monde
+-il se lance au mauvais moment ou il detecte mal le joueur connecter ( timeout)
+
+J'opte pour une version dans le temp pour le guest :
+-creer le monde minimal mais erreur : 
+Failed to load world
+
+The following issues occurred while trying to read world folder
+"p2p_world".
+It might be possible to restore the world from an older state or you can
+report this issue on the bug tracker.
+
+State from 30/05/2026 23:57: vl: Unknown data version: 0
+State from 30/05/2026 23:57: vl: Unknown data version: 0
+
+-tout syncroniser au lancement du monde via les snapshot
 
 build methode : 
 

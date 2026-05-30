@@ -38,3 +38,4 @@ libp2p = { version = "0.53", features = [
     "identify", "relay", "dcutr", "request-response", "cbor", "macros",
 ] }
 futures = "0.3"
+flate2 = "1"

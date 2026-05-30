@@ -7460,6 +7460,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
+ "flate2",
  "futures",
  "libp2p",
  "rand 0.8.6",

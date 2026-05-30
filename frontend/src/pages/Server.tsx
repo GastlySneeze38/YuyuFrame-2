@@ -105,7 +105,11 @@ export default function Server() {
     if (!selectedInstanceId || gameRunning || !username) return
     setLaunchMsg('')
     try {
-      await api.launch.startP2p(selectedInstanceId)
+      if (mode === 'joining') {
+        await api.launch.startP2pGuest(selectedInstanceId)
+      } else {
+        await api.launch.startP2p(selectedInstanceId)
+      }
       setInstanceRunning(selectedInstanceId, true)
       if (closeOnLaunch) getCurrentWindow().hide()
     } catch (e) {

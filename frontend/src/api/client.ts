@@ -82,6 +82,8 @@ export const api = {
       invoke<void>('launch_game', { instanceId }),
     startP2p: (instanceId: string) =>
       invoke<void>('launch_game', { instanceId, p2p: true }),
+    startP2pGuest: (instanceId: string) =>
+      invoke<void>('launch_game', { instanceId, p2p: true, p2pGuest: true }),
   },
 
   sync: {
